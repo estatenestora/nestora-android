@@ -1,0 +1,19 @@
+# Built artifacts
+build/
+.gradle/
+app/build/
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+.DS_Store
+
+# Local configuration files
+local.properties
+
+# Log files and system dumps at root level
+/full_log.txt
+/logcat_output*.txt
+/uidump*.xml
+/*.tmp
+/inst_user_settings.tmp
