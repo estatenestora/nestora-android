@@ -1,4 +1,4 @@
-package com.estatenestora.app.ui.screens
+﻿package com.estatenestora.app.ui.screens
 
 import android.content.Intent
 import android.net.Uri
@@ -50,6 +50,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.IntentSenderRequest
 import com.estatenestora.app.data.model.BookingDetail
+import com.estatenestora.app.data.model.EngagementPlan
+import com.estatenestora.app.data.model.CapacityReservation
+import com.estatenestora.app.data.model.EngagementQuote
 import com.estatenestora.app.ui.components.LiveTrackingMap
 import com.estatenestora.app.ui.theme.NestoraMint
 import com.estatenestora.app.ui.theme.NestoraTextMuted
@@ -110,7 +113,16 @@ fun BookingDetailScreen(
     onConfirmPayment: suspend (String) -> com.estatenestora.app.data.model.AndroidBridgeResponse? = { null },
     onPushLiveLocation: suspend (String, Double, Double) -> Boolean = { _, _, _ -> false },
     onPushCustomerLiveLocation: suspend (String, Double, Double) -> Boolean = { _, _, _ -> false },
-    onRepairCustomerLocation: suspend (String, Double, Double, String) -> Boolean = { _, _, _, _ -> false }
+    onRepairCustomerLocation: suspend (String, Double, Double, String) -> Boolean = { _, _, _, _ -> false },
+    onGetEngagementPlan: suspend (String) -> EngagementPlan? = { null },
+    onGetCapacityReservation: suspend (String) -> CapacityReservation? = { null },
+    onPauseEngagement: suspend (String) -> Boolean = { false },
+    onResumeEngagement: suspend (String) -> Boolean = { false },
+    onSkipNextEngagementVisit: suspend (String) -> Boolean = { false },
+    onGetEngagementQuotes: suspend (String) -> List<EngagementQuote> = { emptyList() },
+    onCreateEngagementQuote: suspend (String, String, Long, Long, Long) -> Boolean = { _, _, _, _, _ -> false },
+    onDecideEngagementQuote: suspend (String, Boolean) -> Boolean = { _, _ -> false },
+    onRefreshBooking: () -> Unit = {}
 ) {
     var showCancelDialog by remember { mutableStateOf(false) }
     var cancelPreview by remember { mutableStateOf<com.estatenestora.app.data.model.CancelPreview?>(null) }
@@ -134,6 +146,13 @@ fun BookingDetailScreen(
     }
 
     var showAcceptDialog by remember { mutableStateOf(false) }
+    var showQuoteDialog by remember { mutableStateOf(false) }
+    var quoteScope by remember { mutableStateOf("") }
+    var quoteVisitFee by remember { mutableStateOf("") }
+    var quoteLabourFee by remember { mutableStateOf("") }
+    var quoteMaterialsFee by remember { mutableStateOf("") }
+    var quoteError by remember { mutableStateOf<String?>(null) }
+    var isSendingQuote by remember { mutableStateOf(false) }
 
     // Rating & Feedback States (Swiggy Rate Screen)
     var rating by remember { mutableStateOf(0) }
@@ -324,7 +343,7 @@ fun BookingDetailScreen(
                     title = { Text("Accept Booking Request", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF0D1A13)) },
                     text = {
                         Text(
-                            "Accept this request at the listed price of ₹${detail.serviceFee.toInt()}? The customer will then be asked to pay Provider's advance before you can start.",
+                            "Accept this request at the listed price of ₹${detail.serviceFee.toInt()}? The customer will then pay the full pre-service amount, including any travel fee, before work can start.",
                             fontSize = 13.sp,
                             color = Color(0xFF4A5568)
                         )
@@ -348,6 +367,50 @@ fun BookingDetailScreen(
                     },
                     shape = RoundedCornerShape(16.dp),
                     containerColor = Color.White
+                )
+            }
+
+            if (showQuoteDialog && detail != null) {
+                AlertDialog(
+                    onDismissRequest = { if (!isSendingQuote) showQuoteDialog = false },
+                    title = { Text("Send Service Quote", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF0D1A13)) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Describe the work and enter the final amounts. The customer must approve this quote before payment.", fontSize = 12.sp, color = NestoraTextMuted)
+                            OutlinedTextField(value = quoteScope, onValueChange = { quoteScope = it; quoteError = null }, label = { Text("Work included") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                            OutlinedTextField(value = quoteVisitFee, onValueChange = { quoteVisitFee = it.filter(Char::isDigit); quoteError = null }, label = { Text("Visit fee (₹)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = quoteLabourFee, onValueChange = { quoteLabourFee = it.filter(Char::isDigit); quoteError = null }, label = { Text("Labour (₹)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = quoteMaterialsFee, onValueChange = { quoteMaterialsFee = it.filter(Char::isDigit); quoteError = null }, label = { Text("Materials (₹, optional)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                            quoteError?.let { Text(it, color = Color(0xFFAB3B3B), fontSize = 12.sp) }
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            val safetyError = quoteScopeSafetyError(quoteScope)
+                            val visit = quoteVisitFee.toLongOrNull()
+                            val labour = quoteLabourFee.toLongOrNull()
+                            val materials = quoteMaterialsFee.toLongOrNull() ?: 0L
+                            when {
+                                safetyError != null -> quoteError = safetyError
+                                detail.engagementId.isBlank() -> quoteError = "This request is missing its quote reference. Refresh and try again."
+                                visit == null || labour == null || visit + labour + materials <= 0 -> quoteError = "Enter at least one valid amount."
+                                else -> scope.launch {
+                                    isSendingQuote = true
+                                    val sent = onCreateEngagementQuote(detail.engagementId, quoteScope.trim(), visit * 100, labour * 100, materials * 100)
+                                    isSendingQuote = false
+                                    if (sent) {
+                                        showQuoteDialog = false
+                                        Toast.makeText(context, "Quote sent to the customer for approval.", Toast.LENGTH_LONG).show()
+                                        onRefreshBooking()
+                                    } else quoteError = "Could not send the quote. Please try again."
+                                }
+                            }
+                        }, enabled = !isSendingQuote, colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)) {
+                            if (isSendingQuote) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp), strokeWidth = 2.dp) else Text("Send Quote", color = Color.White)
+                        }
+                    },
+                    dismissButton = { TextButton(onClick = { showQuoteDialog = false }, enabled = !isSendingQuote) { Text("Cancel") } },
+                    shape = RoundedCornerShape(16.dp), containerColor = Color.White
                 )
             }
 
@@ -382,7 +445,7 @@ fun BookingDetailScreen(
                                     .fillMaxWidth()
                                     .background(
                                         Brush.verticalGradient(
-                                            colors = listOf(Color(0xFF005E46), Color(0xFF004332))
+                                            colors = listOf(Color(0xFF00382B), Color(0xFF00382B))
                                         )
                                     )
                                     .padding(vertical = 40.dp),
@@ -432,23 +495,23 @@ fun BookingDetailScreen(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
                         ) {
                             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Final Summary", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0D1A13))
+                                Text("Payment Summary", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0D1A13))
                                 val effectiveFee = detail.agreedPrice ?: detail.serviceFee
                                 DetailMetadataRow("Service Fee", "₹${effectiveFee.toInt()}")
-                                DetailMetadataRow("Advance Paid ", "₹${(detail.advanceAmount ?: 0.0).toInt()}")
+                                DetailMetadataRow("Full pre-service payment", "₹${(detail.advanceAmount ?: 0.0).toInt()}")
                                 if (detail.commutingFee > 0) {
                                     DetailMetadataRow("Commuting Fee", "₹${detail.commutingFee.toInt()}")
                                 }
                                 DashedDivider()
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text(
-                                        if (isViewerProvider) "Collect directly from customer" else "Pay directly to $counterpartName",
+                                        "Remaining after pre-service payment",
                                         fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0D1A13)
                                     )
                                     Text("₹${detail.remainingAmount.toInt()}", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = NestoraMint)
                                 }
                                 Text(
-                                    "This amount is settled directly between you two — Nestora does not collect it.",
+                                    "Nestora collects the full agreed amount before service starts. No payment is due after service.",
                                     fontSize = 11.sp, color = NestoraTextMuted
                                 )
                             }
@@ -619,13 +682,13 @@ fun BookingDetailScreen(
                             etaMinutes = "25"
                         }
                         "PAYMENT_PENDING" -> {
-                            statusHeader = if (isViewerProvider) "Request Accepted!" else "Pay Advance to Confirm"
-                            statusSubtext = if (isViewerProvider) "Waiting for the customer to pay the advance commission." else "Pay Provider's advance to confirm this booking."
+                            statusHeader = if (isViewerProvider) "Request Accepted!" else "Pay to Confirm"
+                            statusSubtext = if (isViewerProvider) "Waiting for the customer’s full pre-service payment." else "Pay the full pre-service amount to confirm this booking."
                             etaMinutes = "Pay"
                         }
                         "PAYMENT_UPLOADED" -> {
-                            statusHeader = "Advance Submitted!"
-                            statusSubtext = "Nestora is verifying the advance payment."
+                            statusHeader = "Payment Submitted!"
+                            statusSubtext = "Nestora is verifying the pre-service payment."
                             etaMinutes = "Verify"
                         }
                         "CONFIRMED" -> {
@@ -1040,7 +1103,7 @@ fun BookingDetailScreen(
                                                                     text = char,
                                                                     fontSize = 22.sp,
                                                                     fontWeight = FontWeight.ExtraBold,
-                                                                    color = Color(0xFF004332)
+                                                                    color = Color(0xFF00382B)
                                                                 )
                                                             }
                                                         }
@@ -1091,7 +1154,7 @@ fun BookingDetailScreen(
                                                         detail.otpCode ?: "----",
                                                         fontSize = 24.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF005E46),
+                                                        color = Color(0xFF00382B),
                                                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
                                                     )
                                                 }
@@ -1105,24 +1168,23 @@ fun BookingDetailScreen(
                                                 val advanceAmt = billing?.amount ?: detail.advanceAmount ?: 0.0
                                                 
                                                 Text(
-                                                    text = if (detail.status == "PAYMENT_UPLOADED") "Advance submitted — awaiting Nestora verification" else "Waiting for customer to pay the advance",
+                                                    text = if (detail.status == "PAYMENT_UPLOADED") "Payment submitted — awaiting Nestora verification" else "Waiting for the customer’s pre-service payment",
                                                     fontSize = 13.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = Color(0xFF0D1A13),
                                                     textAlign = TextAlign.Center
                                                 )
-                                                Text("Advance : ₹${advanceAmt.toInt()}", fontSize = 12.sp, color = NestoraTextMuted)
+                                                Text("Full pre-service payment: ₹${advanceAmt.toInt()}", fontSize = 12.sp, color = NestoraTextMuted)
                                                 if (detail.commutingFee > 0) {
-                                                    Text("Commuting fee (added to remaining amount): ₹${detail.commutingFee.toInt()}", fontSize = 12.sp, color = NestoraTextMuted)
+                                                    Text("Includes travel fee: ₹${detail.commutingFee.toInt()}", fontSize = 12.sp, color = NestoraTextMuted)
                                                 }
-                                                Text("Remaining amount owed to you after service: ₹${detail.remainingAmount.toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NestoraMint)
+                                                Text("No amount is due after service.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NestoraMint)
                                             } else {
                                                 val effectiveFee = detail.agreedPrice ?: detail.serviceFee
-                                                val commissionPct = detail.advanceCommissionPct ?: 20.0
-                                                val advanceAmt = detail.advanceAmount ?: Math.round(effectiveFee * commissionPct / 100.0).toDouble()
+                                                val advanceAmt = detail.advanceAmount ?: (effectiveFee + detail.commutingFee)
 
                                                 Text(
-                                                    text = "Upfront Advance Payment is due: ₹${advanceAmt.toInt()} (${commissionPct.toInt()}% Commission)",
+                                                    text = "Full pre-service payment due: ₹${advanceAmt.toInt()}",
                                                     fontSize = 14.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = Color(0xFFAB3B3B),
@@ -1155,7 +1217,7 @@ fun BookingDetailScreen(
                                                          }
                                                      }
                                                     Text(
-                                                        text = "Please pay the upfront commission advance using any UPI app on your device, and tap 'Confirm Payment' once done.",
+                                                        text = "This covers the agreed service price and any travel fee. Pay using a UPI app, then tap ‘Confirm Payment’. No post-service payment will be requested.",
                                                         fontSize = 11.sp,
                                                         color = NestoraTextMuted,
                                                         textAlign = TextAlign.Center,
@@ -1222,7 +1284,7 @@ fun BookingDetailScreen(
                                                             shape = RoundedCornerShape(12.dp),
                                                             contentPadding = PaddingValues(0.dp),
                                                             enabled = !isSubmittingPayment,
-                                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF004332))
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00382B))
                                                         ) {
                                                             if (isSubmittingPayment) {
                                                                 CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -1265,6 +1327,24 @@ fun BookingDetailScreen(
                                             if (isViewerProvider) {
                                                 when (detail.status) {
                                                     "REQUESTED" -> {
+                                                        if (detail.requiresProviderQuote) {
+                                                            OutlinedButton(
+                                                                onClick = {
+                                                                    quoteScope = ""
+                                                                    quoteVisitFee = detail.serviceFee.toInt().toString()
+                                                                    quoteLabourFee = "0"
+                                                                    quoteMaterialsFee = "0"
+                                                                    quoteError = null
+                                                                    showQuoteDialog = true
+                                                                },
+                                                                modifier = Modifier.fillMaxWidth(),
+                                                                shape = RoundedCornerShape(12.dp),
+                                                                border = BorderStroke(1.dp, NestoraMint)
+                                                            ) {
+                                                                Text("Send Service Quote", color = NestoraMint, fontWeight = FontWeight.Bold)
+                                                            }
+                                                            Text("Use a quote when the final work price differs from the listed visit fee.", fontSize = 11.sp, color = NestoraTextMuted, textAlign = TextAlign.Center)
+                                                        }
                                                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                                             Button(
                                                                 onClick = { android.util.Log.d("BookingDetailScreen", "Accept button clicked, setting showAcceptDialog = true"); showAcceptDialog = true },
@@ -1735,6 +1815,9 @@ fun BookingDetailScreen(
                                         if (detail.createdAt.isNotBlank()) {
                                             DetailMetadataRow("Booked Date & Time", formatIso(detail.createdAt))
                                         }
+                                        if (!detail.scheduledStartAt.isNullOrBlank() && !detail.scheduledEndAt.isNullOrBlank()) {
+                                            DetailMetadataRow("Service time", "${formatIso(detail.scheduledStartAt)} – ${formatIso(detail.scheduledEndAt)}")
+                                        }
                                         if (detail.agreedPrice != null) {
                                             DetailMetadataRow("Agreed Price", "₹${detail.agreedPrice.toInt()}")
                                         } else {
@@ -1744,7 +1827,7 @@ fun BookingDetailScreen(
                                             DetailMetadataRow("Commuting Fee", "₹${detail.commutingFee.toInt()}")
                                         }
                                         if (detail.advanceAmount != null && detail.advanceAmount > 0.0) {
-                                            DetailMetadataRow("Advance Paid", "-₹${detail.advanceAmount.toInt()}")
+                                            DetailMetadataRow("Pre-service payment", "-₹${detail.advanceAmount.toInt()}")
                                             DetailMetadataRow("Total", "₹${remainingAmt.toInt()}")
                                         } else {
                                             DetailMetadataRow("Total", "₹${totalPrice.toInt()}")

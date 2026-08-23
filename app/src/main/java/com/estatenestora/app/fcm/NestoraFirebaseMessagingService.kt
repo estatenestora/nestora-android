@@ -7,6 +7,7 @@ import android.content.Intent
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.estatenestora.app.MainActivity
+import com.estatenestora.app.R
 import com.estatenestora.app.data.repository.NestoraRepository
 import com.estatenestora.app.data.telegram.TdLibManager
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -55,6 +56,11 @@ class NestoraFirebaseMessagingService : FirebaseMessagingService() {
         val bookingId = data["bookingId"]
         val otpCode = data["otpCode"]  // present only for OTP_GENERATED pushes
 
+        bookingId?.let { id ->
+            serviceScope.launch {
+                com.estatenestora.app.data.repository.NestoraEventBus.bookingUpdates.emit(id)
+            }
+        }
         showNotification(notificationType, title, body, bookingId, otpCode)
     }
 
@@ -109,7 +115,7 @@ class NestoraFirebaseMessagingService : FirebaseMessagingService() {
 
         // ── Build notification ───────────────────────────────────────────────
         val builder = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.nestora_logo_symbol)
             .setContentTitle(title)
             .setContentText(displayBody)
             .setStyle(NotificationCompat.BigTextStyle().bigText(displayBody))

@@ -1,4 +1,4 @@
-package com.estatenestora.app.ui.screens
+﻿package com.estatenestora.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -195,7 +195,7 @@ fun ServicesScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = Color(0xFF004332))
+                CircularProgressIndicator(color = Color(0xFF00382B))
             }
         } else {
             Row(modifier = Modifier.fillMaxSize()) {
@@ -215,7 +215,7 @@ fun ServicesScreen(
                                     .fillMaxWidth()
                                     .padding(horizontal = 6.dp, vertical = 4.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) Color(0xFF004332) else Color.Transparent)
+                                    .background(if (isSelected) Color(0xFF00382B) else Color.Transparent)
                                     .clickable { selectedCategoryIndex = idx }
                                     .padding(vertical = 12.dp, horizontal = 6.dp),
                                 contentAlignment = Alignment.Center
@@ -316,7 +316,7 @@ fun ServicesScreen(
                                             text = "Service Attributes (Form Fields):",
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF004332),
+                                            color = Color(0xFF00382B),
                                             letterSpacing = 0.5.sp
                                         )
                                         Spacer(Modifier.height(6.dp))
