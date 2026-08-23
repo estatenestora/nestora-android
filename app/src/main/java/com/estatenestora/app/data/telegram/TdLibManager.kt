@@ -9,12 +9,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Singleton wrapper around TDLib client.
@@ -42,6 +43,17 @@ object TdLibManager {
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
     private val inlineQueryMutex = Mutex()
+    // Background polling must yield to a customer/provider action. The
+    // counter is incremented before an interactive caller waits for the
+    // mutex, so no new poll can jump ahead of a queued real request.
+    private val waitingInteractiveInlineRequests = AtomicInteger(0)
+    // Telegram must answer an inline query promptly. Bound the full critical
+    // section (including waiting for the mutex), otherwise one lost callback
+    // can block every later app request indefinitely.
+    // Search and booking polling share this one Telegram lane. Leave enough
+    // room for a real customer action to get a response after an in-flight
+    // poll has been cancelled or completed on a slow mobile connection.
+    private const val INLINE_QUERY_TIMEOUT_MS = 20_000L
 
     @Volatile private var initialized = false
     private lateinit var client: Client
@@ -311,39 +323,65 @@ object TdLibManager {
      * @param query  The query string to send (e.g. "AAPP::reqId::plumber in newtown")
      * @return       List of InlineQueryResult (typically InlineQueryResultArticle)
      */
-    suspend fun sendInlineQuery(query: String): Array<TdApi.InlineQueryResult> = inlineQueryMutex.withLock {
-        val uid = awaitBotUserId()
-        Log.d(TAG, "[InlineBridge] Sending inline query to botUserId=$uid query=$query")
-
-        suspendCancellableCoroutine { cont ->
-            try {
-                val req = TdApi.GetInlineQueryResults().apply {
-                    this.botUserId = uid
-                    this.chatId = 0L          // 0 = no specific chat context
-                    this.userLocation = null
-                    this.query = query
-                    this.offset = ""
-                }
-                client.send(req) { result ->
-                    when (result) {
-                        is TdApi.InlineQueryResults -> {
-                            Log.d(TAG, "[InlineBridge] Got ${result.results.size} inline results")
-                            if (cont.isActive) cont.resume(result.results)
-                        }
-                        is TdApi.Error -> {
-                            Log.e(TAG, "[InlineBridge] GetInlineQueryResults error: ${result.code} ${result.message}")
-                            if (cont.isActive) cont.resumeWithException(
-                                RuntimeException("InlineQuery failed: ${result.code} ${result.message}")
-                            )
-                        }
-                        else -> {
-                            if (cont.isActive) cont.resume(emptyArray())
-                        }
+    suspend fun sendInlineQuery(query: String, isBackground: Boolean = false): Array<TdApi.InlineQueryResult> {
+        if (!isBackground) waitingInteractiveInlineRequests.incrementAndGet()
+        try {
+            return withTimeout(if (isBackground) 8_000L else INLINE_QUERY_TIMEOUT_MS) {
+                var response: Array<TdApi.InlineQueryResult>? = null
+                while (true) {
+                    // Never queue a poll ahead of a real search, booking,
+                    // payment, profile, or provider action.
+                    if (isBackground && waitingInteractiveInlineRequests.get() > 0) {
+                        delay(75)
+                        continue
                     }
+                    inlineQueryMutex.lock()
+                    if (isBackground && waitingInteractiveInlineRequests.get() > 0) {
+                        inlineQueryMutex.unlock()
+                        delay(75)
+                        continue
+                    }
+                    try {
+                        val uid = awaitBotUserId()
+                        Log.d(TAG, "[InlineBridge] Sending inline query to botUserId=$uid query=$query")
+
+                        response = suspendCancellableCoroutine { cont ->
+                            try {
+                                val req = TdApi.GetInlineQueryResults().apply {
+                                    this.botUserId = uid
+                                    this.chatId = 0L          // 0 = no specific chat context
+                                    this.userLocation = null
+                                    this.query = query
+                                    this.offset = ""
+                                }
+                                client.send(req) { result ->
+                                    when (result) {
+                                        is TdApi.InlineQueryResults -> {
+                                            Log.d(TAG, "[InlineBridge] Got ${result.results.size} inline results")
+                                            if (cont.isActive) cont.resume(result.results)
+                                        }
+                                        is TdApi.Error -> {
+                                            Log.e(TAG, "[InlineBridge] GetInlineQueryResults error: ${result.code} ${result.message}")
+                                            if (cont.isActive) cont.resumeWithException(
+                                                RuntimeException("InlineQuery failed: ${result.code} ${result.message}")
+                                            )
+                                        }
+                                        else -> if (cont.isActive) cont.resume(emptyArray())
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                if (cont.isActive) cont.resumeWithException(t)
+                            }
+                        }
+                    } finally {
+                        inlineQueryMutex.unlock()
+                    }
+                    break
                 }
-            } catch (t: Throwable) {
-                if (cont.isActive) cont.resumeWithException(t)
+                response ?: emptyArray()
             }
+        } finally {
+            if (!isBackground) waitingInteractiveInlineRequests.decrementAndGet()
         }
     }
 
@@ -505,6 +543,43 @@ object TdLibManager {
                     cont.resume(null)
                 }
             }, timeoutMs)
+        }
+    }
+
+    /**
+     * Sends a P2 request attachment through Dev1 as a transient carrier. The
+     * backend deletes the carrier message and never replies; completion is
+     * checked through the app's inline bridge using the upload token.
+     */
+    suspend fun sendEngagementAttachmentToBot(localFilePath: String, uploadToken: String): Boolean {
+        if (uploadToken.isBlank()) return false
+        return try {
+            val botChatId = awaitBotChatId()
+            suspendCancellableCoroutine { cont ->
+                val document = TdApi.InputMessageDocument().apply {
+                    this.document = TdApi.InputFileLocal(localFilePath)
+                    this.caption = TdApi.FormattedText("AAPP_ENGAGEMENT_ATTACHMENT::$uploadToken", emptyArray())
+                }
+                val req = TdApi.SendMessage().apply {
+                    this.chatId = botChatId
+                    this.inputMessageContent = document
+                }
+                client.send(req) { result ->
+                    if (cont.isActive) {
+                        when (result) {
+                            is TdApi.Message -> cont.resume(true)
+                            is TdApi.Error -> {
+                                Log.e(TAG, "[EngagementUpload] SendMessage error: ${result.code} ${result.message}")
+                                cont.resume(false)
+                            }
+                            else -> cont.resume(false)
+                        }
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "[EngagementUpload] failed", t)
+            false
         }
     }
 

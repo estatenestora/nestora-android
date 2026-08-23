@@ -56,6 +56,9 @@ class BookingPollingController(
     private val _detail = MutableStateFlow<BookingDetail?>(null)
     val detail: StateFlow<BookingDetail?> = _detail.asStateFlow()
 
+    private val _detailNotFound = MutableStateFlow<String?>(null)
+    val detailNotFound: StateFlow<String?> = _detailNotFound.asStateFlow()
+
     private var listJob: Job? = null
     private var detailJob: Job? = null
     private var lastSyncIso: String? = null
@@ -80,7 +83,7 @@ class BookingPollingController(
                     }
                     consecutiveFailures = 0
                     backoffMs = LIST_INTERVAL_MS
-                    mergeSummaries(updates)
+                    mergeSummaries(updates, isFullRefresh = (lastSyncIso == null))
                 } catch (e: Throwable) {
                     consecutiveFailures++
                     backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
@@ -97,8 +100,24 @@ class BookingPollingController(
         listJob = null
     }
 
+    fun triggerListSync() {
+        scope.launch {
+            try {
+                val updates = repository.getMyBookings()
+                mergeSummaries(updates, isFullRefresh = true)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Triggered list sync failed", e)
+            }
+        }
+    }
+
     /** Merges a delta (or full refresh) into the current list by id, newest-first by updatedAt. */
-    private fun mergeSummaries(updates: List<BookingSummary>) {
+    private fun mergeSummaries(updates: List<BookingSummary>, isFullRefresh: Boolean = false) {
+        if (isFullRefresh) {
+            _bookings.value = updates.sortedByDescending { it.updatedAt }
+            lastSyncIso = _bookings.value.maxOfOrNull { it.updatedAt } ?: lastSyncIso
+            return
+        }
         if (updates.isEmpty() && lastSyncIso != null) return // nothing changed since last poll
         val byId = _bookings.value.associateBy { it.id }.toMutableMap()
         for (u in updates) byId[u.id] = u
@@ -109,6 +128,7 @@ class BookingPollingController(
     /** Called when a BookingDetailScreen for [bookingId] becomes visible. */
     fun openDetail(bookingId: String, clearCache: Boolean = true) {
         activeDetailId = bookingId
+        _detailNotFound.value = null
         if (clearCache) {
             _detail.value = null
         }
@@ -123,16 +143,25 @@ class BookingPollingController(
                     consecutiveFailures = 0
                     if (d != null) {
                         _detail.value = d
+                        _detailNotFound.value = null
                         // Keep the list in sync too, so leaving the detail
                         // screen shows the latest status without a fresh poll.
-                        mergeSummaries(listOf(d.toSummary()))
+                        mergeSummaries(listOf(d.toSummary()), isFullRefresh = false)
                         if (d.stage in TERMINAL_STAGES) {
                             Log.d(TAG, "[Detail] booking $bookingId reached terminal stage ${d.stage}, stopping")
                             break
                         }
                         backoffMs = if (d.stage in ACTIVE_STAGES) DETAIL_ACTIVE_INTERVAL_MS else DETAIL_PASSIVE_INTERVAL_MS
                     } else {
-                        backoffMs = DETAIL_PASSIVE_INTERVAL_MS
+                        _detail.value = null
+                        _detailNotFound.value = bookingId
+                        // Remove from active list immediately
+                        val byId = _bookings.value.associateBy { it.id }.toMutableMap()
+                        if (byId.remove(bookingId) != null) {
+                            _bookings.value = byId.values.sortedByDescending { it.updatedAt }
+                        }
+                        Log.d(TAG, "[Detail] booking $bookingId not found, stopping polling")
+                        break
                     }
                 } catch (e: Throwable) {
                     consecutiveFailures++
@@ -149,6 +178,7 @@ class BookingPollingController(
         detailJob?.cancel()
         detailJob = null
         _detail.value = null
+        _detailNotFound.value = null
     }
 
     /** Resume whichever loop(s) were active before the app went to background. */
@@ -178,5 +208,6 @@ class BookingPollingController(
         detailJob = null
         _bookings.value = emptyList()
         _detail.value = null
+        _detailNotFound.value = null
     }
 }

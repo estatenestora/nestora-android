@@ -108,7 +108,17 @@ class MainActivity : ComponentActivity() {
         TdLibManager.init(applicationContext)
 
         setContent {
-            NestoraTheme(darkTheme = false) {
+            // The original mint palette remains the default. Dynamic colour
+            // rotation is explicitly enabled at build time with
+            // NESTORA_DYNAMIC_THEME=true.
+            val appRoyalTheme = remember {
+                if (BuildConfig.DYNAMIC_THEME_ENABLED) {
+                    RoyalThemeRepository.themes.random()
+                } else {
+                    RoyalThemeRepository.legacyMintTheme
+                }
+            }
+            NestoraTheme(darkTheme = false, royalTheme = appRoyalTheme) {
                 val context = LocalContext.current
                 val prefs = remember(context) { context.getSharedPreferences("nestora_prefs", Context.MODE_PRIVATE) }
                 
@@ -242,6 +252,70 @@ class MainActivity : ComponentActivity() {
 
                 var activeScreen by remember { mutableStateOf("main") }
                 var selectedTab by remember { mutableStateOf(0) } // Default to Explore tab
+                var isProviderMode by remember { mutableStateOf(prefs.getBoolean("provider_mode", false)) }
+                val onModeToggle = {
+                    isProviderMode = !isProviderMode
+                    prefs.edit().putBoolean("provider_mode", isProviderMode).apply()
+                    if (isProviderMode) {
+                        // Switched to Provider: Finder (tab 1) is not allowed
+                        if (selectedTab == 1) {
+                            selectedTab = 0 // default to Explore
+                        }
+                    } else {
+                        // Switched to Customer: Register is not allowed
+                        if (activeScreen == "register_choice" || activeScreen == "register_service" || activeScreen == "auto_register") {
+                            activeScreen = "main"
+                            selectedTab = 0 // default to Explore
+                        }
+                    }
+                }
+                val fullTabsList = remember {
+                    listOf(
+                        com.estatenestora.app.ui.theme.NestoraTab("explore", "Explore", "🧭", visibleInHireMode = true, visibleInServeMode = true),
+                        com.estatenestora.app.ui.theme.NestoraTab("finder", "Finder", "🔍", visibleInHireMode = true, visibleInServeMode = false),
+                        com.estatenestora.app.ui.theme.NestoraTab("register", "Register", "🧰", visibleInHireMode = false, visibleInServeMode = true),
+                        com.estatenestora.app.ui.theme.NestoraTab("bookings", "Bookings", "🧾", visibleInHireMode = true, visibleInServeMode = true)
+                    )
+                }
+                val activeTabsList = remember(isProviderMode) {
+                    fullTabsList.filter { 
+                        if (isProviderMode) it.visibleInServeMode else it.visibleInHireMode 
+                    }
+                }
+                val todayTheme = appRoyalTheme
+                val selectedTabId = remember(activeScreen, selectedTab) {
+                    if (activeScreen == "register_choice" || activeScreen == "register_service" || activeScreen == "auto_register") {
+                        "register"
+                    } else {
+                        when (selectedTab) {
+                            0 -> "explore"
+                            1 -> "finder"
+                            2 -> "bookings"
+                            else -> "explore"
+                        }
+                    }
+                }
+                val onTabSelected = { tabId: String ->
+                    when (tabId) {
+                        "explore" -> {
+                            activeScreen = "main"
+                            selectedTab = 0
+                        }
+                        "finder" -> {
+                            activeScreen = "main"
+                            selectedTab = 1
+                            selectedFinderTab = 0
+                        }
+                        "register" -> {
+                            selectedRegisterTab = 0
+                            activeScreen = "register_choice"
+                        }
+                        "bookings" -> {
+                            activeScreen = "main"
+                            selectedTab = 2
+                        }
+                    }
+                }
                 var isScrolled by remember { mutableStateOf(false) }
                 var dismissedBookingIds by remember { mutableStateOf(setOf<String>()) }
                 var showAllBookingsExpanded by remember { mutableStateOf(false) }
@@ -638,6 +712,12 @@ class MainActivity : ComponentActivity() {
                             userPhotoPath = userPhotoPath,
                             profileName = profile?.name,
                             onFetchMyListings = { repository.getMyListings() },
+                            isProviderMode = isProviderMode,
+                            onModeToggle = onModeToggle,
+                            tabsList = activeTabsList,
+                            selectedTabId = selectedTabId,
+                            onTabSelected = onTabSelected,
+                            currentTheme = todayTheme,
                             onClearAutoRegisterChat = {
                                  scope.launch {
                                      repository.aisoReset()
@@ -853,7 +933,13 @@ class MainActivity : ComponentActivity() {
                                         onExploreClick = { selectedTab = 0 },
                                         onScrollChanged = { isScrolled = it },
                                         userPhotoPath = userPhotoPath,
-                                        onBookViaTelegram = { listing -> bookingSheetListing = listing }
+                                        onBookViaTelegram = { listing -> bookingSheetListing = listing },
+                                         isProviderMode = isProviderMode,
+                                         onModeToggle = onModeToggle,
+                                         tabsList = activeTabsList,
+                                         selectedTabId = selectedTabId,
+                                         onTabSelected = onTabSelected,
+                                         currentTheme = todayTheme
                                     )
 
                                     4 -> CategoriesScreen(
@@ -912,7 +998,13 @@ class MainActivity : ComponentActivity() {
                                          onProfileClick = { selectedTab = 3 },
                                          onRegisterServiceClick = { selectedRegisterTab = 0; activeScreen = "register_choice" },
                                          onBookingsClick = { selectedTab = 2 },
-                                         currentLocation = userLocation
+                                         currentLocation = userLocation,
+                                          isProviderMode = isProviderMode,
+                                          onModeToggle = onModeToggle,
+                                          tabsList = activeTabsList,
+                                          selectedTabId = selectedTabId,
+                                          onTabSelected = onTabSelected,
+                                          currentTheme = todayTheme
                                      )
 
                                     2 -> BookingsScreen(
@@ -943,7 +1035,13 @@ class MainActivity : ComponentActivity() {
                                         onExploreClick = { selectedTab = 0 },
                                         onScrollChanged = { isScrolled = it },
                                         userPhotoPath = userPhotoPath,
-                                        onRebookClick = { listing -> bookingSheetListing = listing }
+                                        onRebookClick = { listing -> bookingSheetListing = listing },
+                                         isProviderMode = isProviderMode,
+                                         onModeToggle = onModeToggle,
+                                         tabsList = activeTabsList,
+                                         selectedTabId = selectedTabId,
+                                         onTabSelected = onTabSelected,
+                                         currentTheme = todayTheme
                                     )
 
                                     3 -> {

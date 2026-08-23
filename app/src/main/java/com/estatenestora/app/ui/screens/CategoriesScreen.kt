@@ -1,4 +1,4 @@
-package com.estatenestora.app.ui.screens
+﻿package com.estatenestora.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -138,7 +138,7 @@ fun CategoriesScreen(
                         .padding(64.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = Color(0xFF004332))
+                    CircularProgressIndicator(color = Color(0xFF00382B))
                 }
             } else {
                 val filteredList = categories.mapNotNull { category ->
