@@ -23,6 +23,9 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +36,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.estatenestora.app.data.model.Category
@@ -221,14 +231,43 @@ fun HomeScreen(
     onBookingsClick: () -> Unit = {},
     onExploreClick: () -> Unit = {},
     onScrollChanged: (Boolean) -> Unit = {},
-    userPhotoPath: String? = null
+    userPhotoPath: String? = null,
+    isProviderMode: Boolean = false,
+    onModeToggle: () -> Unit = {},
+    tabsList: List<com.estatenestora.app.ui.theme.NestoraTab> = emptyList(),
+    selectedTabId: String = "explore",
+    onTabSelected: (String) -> Unit = {},
+    currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday(),
+    isLoadingFeed: Boolean = false,
+    onRefreshFeed: () -> Unit = {}
 ) {
+    var isSearchFocused by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("all") }
     var aiInputText by remember { mutableStateOf("") }
     var isVegOnly by remember { mutableStateOf(false) }
+    val activeSearchFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    fun closeActiveSearch(openFinder: Boolean = false) {
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+        isSearchFocused = false
+        if (openFinder) onSearchClick()
+    }
+
+    LaunchedEffect(isSearchFocused) {
+        if (isSearchFocused) activeSearchFocusRequester.requestFocus()
+    }
 
     val listState = rememberLazyListState()
+    // Keep the carousel directly behind the active card instead of leaving
+    // the top navigation beneath it. The sticky resting bar is covered by the
+    // floating surface, while the hero starts under its rounded lower edge.
+    LaunchedEffect(isSearchFocused) {
+        if (isSearchFocused) listState.animateScrollToItem(1)
+    }
     val isScrolled by remember {
         derivedStateOf {
             listState.firstVisibleItemIndex > 0
@@ -287,22 +326,27 @@ fun HomeScreen(
                     currentLocation = currentLocation,
                     onSelectLocationClick = onSelectLocationClick,
                     onProfileClick = onProfileClick,
-                    onRegisterServiceClick = onRegisterServiceClick,
-                    onBookingsClick = onBookingsClick,
-                    onFindServiceClick = onSearchClick,
-                    onExploreClick = onExploreClick,
-                    activeMenu = "explore",
-                    userPhotoPath = userPhotoPath
+                    userPhotoPath = userPhotoPath,
+                    isProviderMode = isProviderMode,
+                    onModeToggle = onModeToggle,
+                    tabsList = tabsList,
+                    selectedTabId = selectedTabId,
+                    onTabSelected = onTabSelected,
+                    currentTheme = currentTheme
                 )
             }
 
-        stickyHeader {
-            OnboardingSearchBar(
-                searchQuery = searchQuery,
-                onSearchQueryChange = { searchQuery = it },
-                isScrolled = isScrolled,
-                hasCarouselBelow = true
-            )
+        if (!isSearchFocused) {
+            stickyHeader {
+                OnboardingSearchBar(
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    isScrolled = isScrolled,
+                    hasCarouselBelow = true,
+                    onClick = { isSearchFocused = true },
+                    currentTheme = currentTheme
+                )
+            }
         }
 
         // ── SWIGGY-STYLE INTEGRATED HERO CAROUSEL ────────────────────────────
@@ -390,7 +434,106 @@ fun HomeScreen(
                             label = cat.name,
                             imageUrl = getRealLifeImageUrl(cat.id),
                             onClick = { onCategorySelected(cat) }
+                         )
+                    }
+                }
+            }
+        }
+
+        // ── AVAILABLE SERVICES & PROVIDERS NEAR YOU (HIRE MODE) ─────────────────
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White)
+                    .padding(top = 8.dp, bottom = 8.dp)
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    thickness = 0.8.dp,
+                    color = Color(0xFFEEEEEE)
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Featured Service Providers",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0D1A13)
                         )
+                        Text(
+                            text = "Verified professionals ready to hire near you",
+                            fontSize = 11.sp,
+                            color = NestoraTextMuted
+                        )
+                    }
+                    if (isLoadingFeed) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = NestoraMint
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+            }
+        }
+
+        if (filteredListings.isNotEmpty()) {
+            items(filteredListings) { listing ->
+                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    MarketplaceListingCard(
+                        listing = listing,
+                        onClick = { onListingClick(listing) },
+                        onBookViaTelegram = { onBookViaTelegram(listing) }
+                    )
+                }
+            }
+        } else if (!isLoadingFeed) {
+            item {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFFF7FAF8),
+                    border = BorderStroke(1.dp, Color(0xFFE2EBE5))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "⚡ Looking for specific help?",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0D1A13)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "Tap any service above or chat with AI to match with top providers instantly.",
+                            fontSize = 12.sp,
+                            color = NestoraTextMuted,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Button(
+                            onClick = onSearchClick,
+                            colors = ButtonDefaults.buttonColors(containerColor = NestoraMint),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Chat with Nestora AI", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -399,14 +542,147 @@ fun HomeScreen(
         item { Spacer(Modifier.height(32.dp)) }
     }
 
-    // Status bar background overlay to prevent content scrolling behind system status bar icons
-    val statusBarHeight = androidx.compose.foundation.layout.WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(statusBarHeight)
-            .background(if (isScrolled) Color.White else Color(0xFF005E46))
-    )
+    // ── Active Search Overlay ──
+    if (isSearchFocused) {
+        val homeOverlayContext = androidx.compose.ui.platform.LocalContext.current
+        DisposableEffect(isSearchFocused) {
+            val window = (homeOverlayContext as? android.app.Activity)?.window
+            if (window != null && isSearchFocused) {
+                val oldColor = window.statusBarColor
+                window.statusBarColor = android.graphics.Color.WHITE
+                val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+                val oldLightStatusBars = insetsController.isAppearanceLightStatusBars
+                insetsController.isAppearanceLightStatusBars = true
+                
+                onDispose {
+                    window.statusBarColor = oldColor
+                    insetsController.isAppearanceLightStatusBars = oldLightStatusBars
+                }
+            } else {
+                onDispose {}
+            }
+        }
+        // Dim backdrop overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { closeActiveSearch() }
+        )
+
+        // Floating Search Card at the top (overlaps the top portion of HeroCarousel)
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 14.dp),
+            shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+            color = Color.White,
+            shadowElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+            ) {
+                // Top Title / Navigation Row
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Left side: Thin black back arrow icon (←)
+                    IconButton(
+                        onClick = { closeActiveSearch() },
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color(0xFF2A2A2A),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Center/Title: Centered, clean dark text
+                    Text(
+                        text = "Search for services & providers",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF2A2A2A),
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // The overlay owns the same query as the resting search bar;
+                // closing it never loses what the provider/customer typed.
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(15.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.5.dp, Color(0xFFE0E0E0))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Input Box Area (No magnifying glass icon on the left)
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (searchQuery.isEmpty()) {
+                                Column(verticalArrangement = Arrangement.Center) {
+                                    Text("Try 'Plumber'", color = Color(0xFF9E9E9E), fontSize = 13.sp)
+                                    Text("Try 'Maid'", color = Color(0xFF9E9E9E).copy(alpha = 0.6f), fontSize = 10.sp)
+                                }
+                            }
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                singleLine = true,
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF0D1A13)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(activeSearchFocusRequester),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(
+                                    onSearch = { closeActiveSearch(openFinder = searchQuery.isNotBlank()) }
+                                )
+                            )
+                        }
+
+                        // Right side: vertical divider line and orange microphone icon
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(1.dp)
+                                .background(Color(0xFFEAEAEA))
+                                .padding(vertical = 12.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        MicIcon(
+                            color = Color(0xFFFF5722),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 }
 

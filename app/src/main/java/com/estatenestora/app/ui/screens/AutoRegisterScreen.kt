@@ -356,13 +356,13 @@ fun AutoRegisterScreen(
                         val fullAddress = "${place.title}, ${place.subtitle}"
                         sendTurn(fullAddress, loc.latitude, loc.longitude)
                     } else {
-                        Toast.makeText(context, "Could not resolve address. Please type your location manually.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Could not resolve the address. Use Choose on Map to set the service location.", Toast.LENGTH_LONG).show()
                     }
                 } else {
                     isLocatingLocation = false
                     Toast.makeText(
                         context,
-                        "Couldn't get a location fix yet — try again with a clear view of the sky, or type your area/city instead.",
+                        "Couldn't get a location fix yet — try again, or use Choose on Map.",
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -372,7 +372,7 @@ fun AutoRegisterScreen(
                 isLocatingLocation = false
                 val loadingIndex = messages.indexOfFirst { it.id == loadingId }
                 if (loadingIndex >= 0) messages.removeAt(loadingIndex)
-                Toast.makeText(context, "Couldn't detect your location. Please type it manually.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Couldn't detect your location. Use Choose on Map instead.", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -816,7 +816,19 @@ fun AutoRegisterScreen(
                 }
 
                 items(messages) { msg ->
-                    val isLocReq = !msg.isUser && (msg.text.contains("Where is this service located", ignoreCase = true) || msg.text.contains("Share My Location", ignoreCase = true))
+                    // The backend already gives this message a typed AISO gap.  Do
+                    // not infer an important step such as location from English
+                    // presentation text: wording can change without changing the
+                    // protocol, which previously hid both location actions from a
+                    // valid required-location response.
+                    val isLocReq = !msg.isUser && (
+                        msg.aisoGap?.fieldType == "location" ||
+                            msg.aisoGap?.key == "__location__" ||
+                            // Retain the old copy check only for a response from an
+                            // older backend during a rolling app/backend update.
+                            msg.text.contains("Where is this service located", ignoreCase = true) ||
+                            msg.text.contains("Share My Location", ignoreCase = true)
+                        )
                     val isCustReq = !msg.isUser && msg.text.contains("switch to the Explore or Find Service tab", ignoreCase = true)
                     val isLatestBotMsg = messages.lastOrNull { !it.isUser }?.id == msg.id
                     
@@ -1122,11 +1134,13 @@ fun AutoRegisterScreen(
             }
 
         val currentGap = messages.lastOrNull { !it.isUser }?.aisoGap
-        val isStrictInput = currentGap != null && (
-            currentGap.inputType == "select" ||
-            currentGap.inputType == "multiselect" ||
-            currentGap.inputType == "boolean" ||
-            currentGap.key == "location"
+        // Location is deliberately GPS/map-only. This keeps listing geography
+        // precise and prevents free-text area names from producing ambiguous or
+        // misleading service locations.
+        val isStrictInput = currentGap != null && requiresChoiceOnlyRegistrationInput(
+            currentGap.inputType,
+            currentGap.fieldType,
+            currentGap.key
         )
 
         if ((isInputEnabled || isStrictInput) && !readyToConfirm) {
@@ -1152,7 +1166,9 @@ fun AutoRegisterScreen(
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = "Select from the choices above to reply",
+                                text = if (currentGap?.fieldType == "location" || currentGap?.key == "__location__")
+                                    "Use Share My Location or Choose on Map above"
+                                else "Select from the choices above to reply",
                                 color = Color(0xFFFF8C00), // High-contrast orange
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold

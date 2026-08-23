@@ -38,6 +38,15 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.estatenestora.app.data.model.BookingSummary
 import com.estatenestora.app.ui.theme.*
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 
 @Composable
 fun BookingsBottomCalendarIcon(isSelected: Boolean, modifier: Modifier = Modifier) {
@@ -50,7 +59,7 @@ fun BookingsBottomCalendarIcon(isSelected: Boolean, modifier: Modifier = Modifie
         modifier = modifier.size(22.dp),
         shape = RoundedCornerShape(4.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFF004332) else Color(0xFF888888))
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFF00382B) else Color(0xFF888888))
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -71,7 +80,7 @@ fun BookingsBottomCalendarIcon(isSelected: Boolean, modifier: Modifier = Modifie
                     text = today,
                     fontSize = 7.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color(0xFF004332),
+                    color = Color(0xFF00382B),
                     lineHeight = 7.sp
                 )
                 Text(
@@ -216,7 +225,7 @@ fun HeroCarousel(theme: String = "home") {
                             text = actionLabel,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF004332),
+                            color = Color(0xFF00382B),
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
                         )
                     }
@@ -264,7 +273,13 @@ fun BookingsScreen(
     onExploreClick: () -> Unit = {},
     onScrollChanged: (Boolean) -> Unit = {},
     userPhotoPath: String? = null,
-    onRebookClick: (com.estatenestora.app.data.model.ServiceListing) -> Unit = {}
+    onRebookClick: (com.estatenestora.app.data.model.ServiceListing) -> Unit = {},
+    isProviderMode: Boolean = false,
+    onModeToggle: () -> Unit = {},
+    tabsList: List<com.estatenestora.app.ui.theme.NestoraTab> = emptyList(),
+    selectedTabId: String = "bookings",
+    onTabSelected: (String) -> Unit = {},
+    currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday()
 ) {
     // No distinct "PROVIDER" role exists in the backend — a user is a
     // provider by virtue of owning listings. Sent = bookings the viewer made
@@ -277,88 +292,133 @@ fun BookingsScreen(
     }
     var selectedBookingsTab by remember { mutableStateOf(0) } // 0 = Bookings, 1 = Sent, 2 = Received
     var searchQuery by remember { mutableStateOf("") }
+    var isSearchFocused by remember { mutableStateOf(false) }
     var currentPage by remember { mutableStateOf(0) }
+
+    var isBottomBarVisible by remember { mutableStateOf(true) }
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y > 12f && !isBottomBarVisible) {
+                    isBottomBarVisible = true
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (consumed.y < -12f && isBottomBarVisible) {
+                    isBottomBarVisible = false
+                } else if (consumed.y + available.y > 12f && !isBottomBarVisible) {
+                    isBottomBarVisible = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
+    LaunchedEffect(selectedBookingsTab) {
+        isBottomBarVisible = true
+    }
 
     LaunchedEffect(selectedBookingsTab, searchQuery) {
         currentPage = 0
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(nestedScrollConnection),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Color.White,
-                shadowElevation = 8.dp,
-                border = androidx.compose.foundation.BorderStroke(0.8.dp, Color(0xFFE2EAF2))
+            AnimatedVisibility(
+                visible = isBottomBarVisible,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .height(52.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color.White,
+                    shadowElevation = 8.dp,
+                    border = androidx.compose.foundation.BorderStroke(0.8.dp, Color(0xFFE2EAF2))
                 ) {
-                    // Bookings Tab Button: show calendar icon only, NO label per request
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable { selectedBookingsTab = 0 }
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .height(52.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        BookingsBottomCalendarIcon(isSelected = selectedBookingsTab == 0)
-                    }
+                        // Same compact icon/label rhythm as Explore navigation.
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clickable { selectedBookingsTab = 0 }
+                        ) {
+                            BookingsBottomCalendarIcon(isSelected = selectedBookingsTab == 0, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.height(1.dp))
+                            Text(
+                                text = "Bookings",
+                                fontSize = 9.sp,
+                                fontWeight = if (selectedBookingsTab == 0) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selectedBookingsTab == 0) NestoraMint else Color(0xFF8FA7A0)
+                            )
+                        }
 
-                    // Sent Tab Button
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable { selectedBookingsTab = 1 }
-                            .padding(vertical = 4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Send,
-                            contentDescription = "Sent",
-                            tint = if (selectedBookingsTab == 1) NestoraMint else Color(0xFF888888),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = "Sent",
-                            fontSize = 11.sp,
-                            fontWeight = if (selectedBookingsTab == 1) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selectedBookingsTab == 1) NestoraMint else Color(0xFF888888)
-                        )
-                    }
+                        // Sent Tab Button
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clickable { selectedBookingsTab = 1 }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = "Sent",
+                                tint = if (selectedBookingsTab == 1) NestoraMint else Color(0xFF888888),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.height(1.dp))
+                            Text(
+                                text = "Sent",
+                                fontSize = 9.sp,
+                                fontWeight = if (selectedBookingsTab == 1) FontWeight.Bold else FontWeight.Normal,
+                                color = if (selectedBookingsTab == 1) NestoraMint else Color(0xFF888888)
+                            )
+                        }
 
-                    // Received Tab Button
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable { selectedBookingsTab = 2 }
-                            .padding(vertical = 4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Email,
-                            contentDescription = "Received",
-                            tint = if (selectedBookingsTab == 2) NestoraMint else Color(0xFF888888),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = "Received",
-                            fontSize = 11.sp,
-                            fontWeight = if (selectedBookingsTab == 2) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selectedBookingsTab == 2) NestoraMint else Color(0xFF888888)
-                        )
+                        // Received Tab Button
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clickable { selectedBookingsTab = 2 }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Email,
+                                contentDescription = "Received",
+                                tint = if (selectedBookingsTab == 2) NestoraMint else Color(0xFF888888),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.height(1.dp))
+                            Text(
+                                text = "Received",
+                                fontSize = 9.sp,
+                                fontWeight = if (selectedBookingsTab == 2) FontWeight.Bold else FontWeight.Normal,
+                                color = if (selectedBookingsTab == 2) NestoraMint else Color(0xFF888888)
+                            )
+                        }
                     }
                 }
             }
@@ -370,9 +430,17 @@ fun BookingsScreen(
                 .padding(bottom = innerPadding.calculateBottomPadding())
         ) {
             val listState = rememberLazyListState()
+            LaunchedEffect(isSearchFocused) {
+                if (isSearchFocused) listState.animateScrollToItem(1)
+            }
             val isScrolled by remember {
                 derivedStateOf {
-                    listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0
+                    listState.firstVisibleItemIndex > 0
+                }
+            }
+            LaunchedEffect(isScrolled) {
+                if (!isScrolled) {
+                    isBottomBarVisible = true
                 }
             }
 
@@ -417,23 +485,28 @@ fun BookingsScreen(
                         currentLocation = currentLocation,
                         onSelectLocationClick = onSelectLocationClick,
                         onProfileClick = onProfileClick,
-                        onRegisterServiceClick = onRegisterServiceClick,
-                        onBookingsClick = onBookingsClick,
-                        onFindServiceClick = onFindServiceClick,
-                        onExploreClick = onExploreClick,
-                        activeMenu = "bookings",
-                        userPhotoPath = userPhotoPath
+                        userPhotoPath = userPhotoPath,
+                        isProviderMode = isProviderMode,
+                        onModeToggle = onModeToggle,
+                        tabsList = tabsList,
+                        selectedTabId = selectedTabId,
+                        onTabSelected = onTabSelected,
+                        currentTheme = currentTheme
                     )
                 }
 
                 // 2. Sticky search bar matching Explore
-                stickyHeader {
-                    OnboardingSearchBar(
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = { searchQuery = it },
-                        isScrolled = isScrolled,
-                        hasCarouselBelow = true
-                    )
+                if (!isSearchFocused) {
+                    stickyHeader {
+                        OnboardingSearchBar(
+                            searchQuery = searchQuery,
+                            onSearchQueryChange = { searchQuery = it },
+                            isScrolled = isScrolled,
+                            hasCarouselBelow = true,
+                            onClick = { isSearchFocused = true },
+                            currentTheme = currentTheme
+                        )
+                    }
                 }
 
                 // 3. Hero Carousel Banner
@@ -573,7 +646,12 @@ fun BookingsScreen(
                         val pageSize = 5
                         val paginatedReceived = receivedBookings.take((currentPage + 1) * pageSize)
 
-                        if (!hasProviderListings) {
+                        // The profile projection can be one refresh behind a
+                        // just-published listing.  A booking whose provider id is
+                        // the current viewer is conclusive evidence that this user
+                        // is a provider, and must never be hidden by that stale
+                        // hint.
+                        if (!shouldShowProviderInbox(hasProviderListings, receivedBookings.size)) {
                             item {
                                 BookingsEmptyState(
                                     emoji = "🧰",
@@ -605,14 +683,14 @@ fun BookingsScreen(
                 item { Spacer(Modifier.height(32.dp)) }
             }
 
-            // Status bar background overlay to prevent content scrolling behind system status bar icons
-            val statusBarHeight = androidx.compose.foundation.layout.WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(statusBarHeight)
-                    .background(if (isScrolled) Color.White else Color(0xFF005E46))
+            FloatingSearchOverlay(
+                visible = isSearchFocused,
+                query = searchQuery,
+                title = "Search your bookings",
+                onQueryChange = { searchQuery = it },
+                onDismiss = { isSearchFocused = false }
             )
+
         }
     }
 }
@@ -679,7 +757,7 @@ fun StatPill(label: String, sublabel: String) {
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(label, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF004332))
+            Text(label, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF00382B))
             Text(sublabel, fontSize = 10.sp, color = Color(0xFF3E5C50), fontWeight = FontWeight.Medium)
         }
     }
@@ -692,12 +770,19 @@ fun BookingCard(
     onClick: () -> Unit = {},
     onPayClick: (BookingSummary) -> Unit,
     onCancelClick: (BookingSummary) -> Unit,
-    onRebookClick: (com.estatenestora.app.data.model.ServiceListing) -> Unit = {}
+    onRebookClick: (com.estatenestora.app.data.model.ServiceListing) -> Unit = {},
+    isProviderMode: Boolean = false,
+    onModeToggle: () -> Unit = {},
+    tabsList: List<com.estatenestora.app.ui.theme.NestoraTab> = emptyList(),
+    selectedTabId: String = "bookings",
+    onTabSelected: (String) -> Unit = {},
+    currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday()
 ) {
     val isViewerProvider = viewerUserId != null && booking.providerUserId == viewerUserId
     val counterpartLabel = if (isViewerProvider) "Customer" else "Provider"
     val counterpartName = if (isViewerProvider) booking.customerName else booking.providerName
     val isCustomer = viewerUserId != null && booking.customerUserId == viewerUserId
+    val nextStepMessage = if (isViewerProvider) booking.providerMessage else booking.customerMessage
 
     Surface(
         modifier = Modifier
@@ -790,6 +875,16 @@ fun BookingCard(
             }
 
             HorizontalDivider(color = Color(0xFFF0F2F5), thickness = 1.dp)
+
+            if (nextStepMessage.isNotBlank()) {
+                Text(
+                    text = nextStepMessage,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    color = Color(0xFF486158),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             // Items list style: provider location + customer address rows
             Column(

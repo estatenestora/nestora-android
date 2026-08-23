@@ -110,15 +110,15 @@ fun NestoraSplashScreen(onContinue: () -> Unit) {
                     Image(
                         painter = painterResource(id = R.drawable.nestora_logo),
                         contentDescription = "Nestora Logo",
-                        modifier = Modifier.size(160.dp)
+                        modifier = Modifier.size(190.dp)
                     )
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(24.dp))
                     Text(
                         text = "NESTORA",
-                        fontSize = 38.sp,
-                        fontWeight = FontWeight.Black,
-                        color = NestoraMintDark,
-                        letterSpacing = 2.sp
+                        fontSize = 40.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00966B),
+                        letterSpacing = 3.sp
                     )
                 }
             }

@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -108,7 +109,17 @@ class MainActivity : ComponentActivity() {
         TdLibManager.init(applicationContext)
 
         setContent {
-            NestoraTheme(darkTheme = false) {
+            // The original mint palette remains the default. Dynamic colour
+            // rotation is explicitly enabled at build time with
+            // NESTORA_DYNAMIC_THEME=true.
+            val appRoyalTheme = remember {
+                if (BuildConfig.DYNAMIC_THEME_ENABLED) {
+                    RoyalThemeRepository.themes.random()
+                } else {
+                    RoyalThemeRepository.legacyMintTheme
+                }
+            }
+            NestoraTheme(darkTheme = false, royalTheme = appRoyalTheme) {
                 val context = LocalContext.current
                 val prefs = remember(context) { context.getSharedPreferences("nestora_prefs", Context.MODE_PRIVATE) }
                 
@@ -144,32 +155,6 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val authState by TdLibManager.authState.collectAsState()
-
-                // 0. Startup Splash Gate (Figma Page 1 & 2)
-                // Prevent login/auth screen from flashing briefly while TDLib is initializing its session
-                if (authState is TdLibManager.AuthState.Uninitialized) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFF005E46)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "Nestora",
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White
-                            )
-                            Spacer(Modifier.height(16.dp))
-                            CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(36.dp))
-                        }
-                    }
-                    return@NestoraTheme
-                }
 
                 // Automatically fetch and geocode GPS location on app start / permission grant
                 LaunchedEffect(locationGranted) {
@@ -242,6 +227,70 @@ class MainActivity : ComponentActivity() {
 
                 var activeScreen by remember { mutableStateOf("main") }
                 var selectedTab by remember { mutableStateOf(0) } // Default to Explore tab
+                var isProviderMode by remember { mutableStateOf(prefs.getBoolean("provider_mode", false)) }
+                val onModeToggle = {
+                    isProviderMode = !isProviderMode
+                    prefs.edit().putBoolean("provider_mode", isProviderMode).apply()
+                    if (isProviderMode) {
+                        // Switched to Provider: Finder (tab 1) is not allowed
+                        if (selectedTab == 1) {
+                            selectedTab = 0 // default to Explore
+                        }
+                    } else {
+                        // Switched to Customer: Register is not allowed
+                        if (activeScreen == "register_choice" || activeScreen == "register_service" || activeScreen == "auto_register") {
+                            activeScreen = "main"
+                            selectedTab = 0 // default to Explore
+                        }
+                    }
+                }
+                val fullTabsList = remember {
+                    listOf(
+                        com.estatenestora.app.ui.theme.NestoraTab("explore", "Explore", "🧭", visibleInHireMode = true, visibleInServeMode = true),
+                        com.estatenestora.app.ui.theme.NestoraTab("finder", "Finder", "🔍", visibleInHireMode = true, visibleInServeMode = false),
+                        com.estatenestora.app.ui.theme.NestoraTab("register", "Register", "🧰", visibleInHireMode = false, visibleInServeMode = true),
+                        com.estatenestora.app.ui.theme.NestoraTab("bookings", "Bookings", "🧾", visibleInHireMode = true, visibleInServeMode = true)
+                    )
+                }
+                val activeTabsList = remember(isProviderMode) {
+                    fullTabsList.filter { 
+                        if (isProviderMode) it.visibleInServeMode else it.visibleInHireMode 
+                    }
+                }
+                val todayTheme = appRoyalTheme
+                val selectedTabId = remember(activeScreen, selectedTab) {
+                    if (activeScreen == "register_choice" || activeScreen == "register_service" || activeScreen == "auto_register") {
+                        "register"
+                    } else {
+                        when (selectedTab) {
+                            0 -> "explore"
+                            1 -> "finder"
+                            2 -> "bookings"
+                            else -> "explore"
+                        }
+                    }
+                }
+                val onTabSelected = { tabId: String ->
+                    when (tabId) {
+                        "explore" -> {
+                            activeScreen = "main"
+                            selectedTab = 0
+                        }
+                        "finder" -> {
+                            activeScreen = "main"
+                            selectedTab = 1
+                            selectedFinderTab = 0
+                        }
+                        "register" -> {
+                            selectedRegisterTab = 0
+                            activeScreen = "register_choice"
+                        }
+                        "bookings" -> {
+                            activeScreen = "main"
+                            selectedTab = 2
+                        }
+                    }
+                }
                 var isScrolled by remember { mutableStateOf(false) }
                 var dismissedBookingIds by remember { mutableStateOf(setOf<String>()) }
                 var showAllBookingsExpanded by remember { mutableStateOf(false) }
@@ -283,6 +332,8 @@ class MainActivity : ComponentActivity() {
                     return sdf.format(java.util.Date())
                 }
                 var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
+                var feedListings by remember { mutableStateOf<List<ServiceListing>>(emptyList()) }
+                var isLoadingFeed by remember { mutableStateOf(false) }
                 val bookings by bookingPolling.bookings.collectAsState()
                 val bookingDetail by bookingPolling.detail.collectAsState()
                 var shownAnimationBookingIds by remember { mutableStateOf(setOf<String>()) }
@@ -430,21 +481,44 @@ class MainActivity : ComponentActivity() {
 
                         // Fetch FCM token and register it
                         try {
+                            // Register cached token first if available
+                            val cachedToken = prefs.getString("fcm_token", null)
+                            if (!cachedToken.isNullOrBlank()) {
+                                scope.launch {
+                                    try {
+                                        repository.registerFcmToken(cachedToken)
+                                    } catch (e: Exception) {
+                                        Log.e("MainActivity", "Failed to register cached FCM token with backend", e)
+                                    }
+                                }
+                            }
+
                             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                                 .addOnCompleteListener { task ->
                                     if (task.isSuccessful) {
                                         val token = task.result
-                                        Log.i("MainActivity", "FCM token retrieved: $token")
-                                        prefs.edit().putString("fcm_token", token).apply()
-                                        scope.launch {
-                                            try {
-                                                repository.registerFcmToken(token)
-                                            } catch (e: Exception) {
-                                                Log.e("MainActivity", "Failed to register FCM token with backend", e)
+                                        if (!token.isNullOrBlank()) {
+                                            Log.i("MainActivity", "FCM token retrieved: $token")
+                                            prefs.edit().putString("fcm_token", token).apply()
+                                            scope.launch {
+                                                try {
+                                                    repository.registerFcmToken(token)
+                                                } catch (e: Exception) {
+                                                    Log.e("MainActivity", "Failed to register FCM token with backend", e)
+                                                }
                                             }
                                         }
                                     } else {
-                                        Log.w("MainActivity", "FCM token fetch failed", task.exception)
+                                        val exception = task.exception
+                                        Log.w("MainActivity", "FCM token fetch failed: ${exception?.message}")
+                                        // On registration overflow or stale instance ID, attempt token cleanup
+                                        if (exception?.message?.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true) == true) {
+                                            try {
+                                                com.google.firebase.messaging.FirebaseMessaging.getInstance().deleteToken()
+                                            } catch (delEx: Exception) {
+                                                Log.w("MainActivity", "Failed to delete stale FCM token", delEx)
+                                            }
+                                        }
                                     }
                                 }
                         } catch (e: Exception) {
@@ -464,6 +538,22 @@ class MainActivity : ComponentActivity() {
                             if (categories.isEmpty()) {
                                 attempts++
                                 kotlinx.coroutines.delay(3000)
+                            }
+                        }
+
+                        // Load initial feed of service providers for HIRE mode
+                        scope.launch {
+                            try {
+                                isLoadingFeed = true
+                                val feedResp = repository.getFeedListings(
+                                    addressBarLatitude = if (currentLat != 0.0) currentLat else null,
+                                    addressBarLongitude = if (currentLon != 0.0) currentLon else null
+                                )
+                                feedListings = feedResp?.listings?.map { it.toServiceListing() } ?: emptyList()
+                            } catch (e: Exception) {
+                                Log.e("MainActivity", "Failed to load feed listings", e)
+                            } finally {
+                                isLoadingFeed = false
                             }
                         }
                     } else {
@@ -492,8 +582,24 @@ class MainActivity : ComponentActivity() {
                 // above already gave up — try again whenever the user visits
                 // Explore and still has nothing to show.
                 LaunchedEffect(selectedTab) {
-                    if (selectedTab == 0 && categories.isEmpty() && authState is TdLibManager.AuthState.Ready) {
-                        categories = repository.getCategories()
+                    if (selectedTab == 0 && authState is TdLibManager.AuthState.Ready) {
+                        if (categories.isEmpty()) {
+                            categories = repository.getCategories()
+                        }
+                        if (feedListings.isEmpty() && !isLoadingFeed) {
+                            try {
+                                isLoadingFeed = true
+                                val feedResp = repository.getFeedListings(
+                                    addressBarLatitude = if (currentLat != 0.0) currentLat else null,
+                                    addressBarLongitude = if (currentLon != 0.0) currentLon else null
+                                )
+                                feedListings = feedResp?.listings?.map { it.toServiceListing() } ?: emptyList()
+                            } catch (e: Exception) {
+                                Log.e("MainActivity", "Failed to refresh feed listings", e)
+                            } finally {
+                                isLoadingFeed = false
+                            }
+                        }
                     }
                 }
 
@@ -638,6 +744,12 @@ class MainActivity : ComponentActivity() {
                             userPhotoPath = userPhotoPath,
                             profileName = profile?.name,
                             onFetchMyListings = { repository.getMyListings() },
+                            isProviderMode = isProviderMode,
+                            onModeToggle = onModeToggle,
+                            tabsList = activeTabsList,
+                            selectedTabId = selectedTabId,
+                            onTabSelected = onTabSelected,
+                            currentTheme = todayTheme,
                             onClearAutoRegisterChat = {
                                  scope.launch {
                                      repository.aisoReset()
@@ -836,8 +948,25 @@ class MainActivity : ComponentActivity() {
                                 when (selectedTab) {
                                     0 -> HomeScreen(
                                         categories = categories,
-                                        listings = emptyList(),
-                                        onListingClick = { selectedTab = 1; selectedFinderTab = 1 },
+                                        listings = feedListings,
+                                        isLoadingFeed = isLoadingFeed,
+                                        onRefreshFeed = {
+                                            scope.launch {
+                                                try {
+                                                    isLoadingFeed = true
+                                                    val feedResp = repository.getFeedListings(
+                                                        addressBarLatitude = if (currentLat != 0.0) currentLat else null,
+                                                        addressBarLongitude = if (currentLon != 0.0) currentLon else null
+                                                    )
+                                                    feedListings = feedResp?.listings?.map { it.toServiceListing() } ?: emptyList()
+                                                } catch (e: Exception) {
+                                                    Log.e("MainActivity", "Failed to refresh feed listings", e)
+                                                } finally {
+                                                    isLoadingFeed = false
+                                                }
+                                            }
+                                        },
+                                        onListingClick = { listing -> bookingSheetListing = listing },
                                         onSearchClick = { selectedTab = 1; selectedFinderTab = 1 },
                                         onCategorySelected = { cat ->
                                             selectedTab = 1
@@ -853,7 +982,13 @@ class MainActivity : ComponentActivity() {
                                         onExploreClick = { selectedTab = 0 },
                                         onScrollChanged = { isScrolled = it },
                                         userPhotoPath = userPhotoPath,
-                                        onBookViaTelegram = { listing -> bookingSheetListing = listing }
+                                        onBookViaTelegram = { listing -> bookingSheetListing = listing },
+                                         isProviderMode = isProviderMode,
+                                         onModeToggle = onModeToggle,
+                                         tabsList = activeTabsList,
+                                         selectedTabId = selectedTabId,
+                                         onTabSelected = onTabSelected,
+                                         currentTheme = todayTheme
                                     )
 
                                     4 -> CategoriesScreen(
@@ -912,7 +1047,13 @@ class MainActivity : ComponentActivity() {
                                          onProfileClick = { selectedTab = 3 },
                                          onRegisterServiceClick = { selectedRegisterTab = 0; activeScreen = "register_choice" },
                                          onBookingsClick = { selectedTab = 2 },
-                                         currentLocation = userLocation
+                                         currentLocation = userLocation,
+                                          isProviderMode = isProviderMode,
+                                          onModeToggle = onModeToggle,
+                                          tabsList = activeTabsList,
+                                          selectedTabId = selectedTabId,
+                                          onTabSelected = onTabSelected,
+                                          currentTheme = todayTheme
                                      )
 
                                     2 -> BookingsScreen(
@@ -943,7 +1084,13 @@ class MainActivity : ComponentActivity() {
                                         onExploreClick = { selectedTab = 0 },
                                         onScrollChanged = { isScrolled = it },
                                         userPhotoPath = userPhotoPath,
-                                        onRebookClick = { listing -> bookingSheetListing = listing }
+                                        onRebookClick = { listing -> bookingSheetListing = listing },
+                                         isProviderMode = isProviderMode,
+                                         onModeToggle = onModeToggle,
+                                         tabsList = activeTabsList,
+                                         selectedTabId = selectedTabId,
+                                         onTabSelected = onTabSelected,
+                                         currentTheme = todayTheme
                                     )
 
                                     3 -> {

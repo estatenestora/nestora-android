@@ -1,4 +1,4 @@
-package com.estatenestora.app.ui.screens
+﻿package com.estatenestora.app.ui.screens
 
 import android.widget.Toast
 import android.net.Uri
@@ -28,6 +28,15 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.ShoppingCart
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.List
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
@@ -505,7 +514,7 @@ fun ProfileScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFFF7FDFA)),
+                    .background(Color.White),
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
                 // Item 1: Swiggy-style top header block (curved gradient card)
@@ -513,41 +522,38 @@ fun ProfileScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+                            .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))
                             .background(
                                 Brush.verticalGradient(
-                                    colors = listOf(Color(0xFF005E46), Color(0xFF004332))
+                                    colors = listOf(Color(0xFF00382B), Color(0xFF00382B))
                                 )
                             )
                             .statusBarsPadding()
-                            .padding(top = 8.dp, bottom = 32.dp)
+                            .padding(top = 8.dp, bottom = 16.dp)
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             // Top Actions: Back Arrow (Left), Help (Right), Vertical Overflow Dots (Right)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                                    .padding(start = 12.dp, end = 12.dp, bottom = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                // Back Arrow in outline circle
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.15f))
-                                        .clickable { onBack() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(20.dp))
+                                // Left: White back arrow icon
+                                IconButton(onClick = onBack) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = Color.White
+                                    )
                                 }
 
-                                // Right buttons: Help Pill & More Dots
+                                // Right: Help pill and vertical three-dots icon
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Surface(
                                         shape = RoundedCornerShape(20.dp),
-                                        color = Color.White.copy(alpha = 0.15f),
+                                        color = Color.White.copy(alpha = 0.2f),
                                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
                                         modifier = Modifier.clickable {
                                             Toast.makeText(context, "Support Contact: support@nestora.app", Toast.LENGTH_LONG).show()
@@ -562,33 +568,34 @@ fun ProfileScreen(
                                         )
                                     }
                                     
-                                    Spacer(Modifier.width(8.dp))
+                                    Spacer(Modifier.width(4.dp))
                                     
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.White.copy(alpha = 0.15f))
-                                            .clickable { menuExpanded = true },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Default.MoreVert, contentDescription = "Options", tint = Color.White, modifier = Modifier.size(20.dp))
+                                    IconButton(onClick = { menuExpanded = true }) {
+                                        Icon(
+                                            imageVector = Icons.Default.MoreVert,
+                                            contentDescription = "Options",
+                                            tint = Color.White
+                                        )
                                     }
                                 }
                             }
 
-                            // User Identity Block
+                            // User Identity Block (Avatar restored, Name, Phone, Email stacked)
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 24.dp)
+                                    .padding(horizontal = 24.dp, vertical = 8.dp)
                             ) {
                                 // Profile photo avatar circle
                                 Box(
                                     modifier = Modifier
                                         .size(72.dp)
                                         .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.2f)),
+                                        .background(Color.White.copy(alpha = 0.2f))
+                                        .clickable {
+                                            displayPicUri = null
+                                            isEditing = true
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (!resolvedPhotoPath.isNullOrBlank()) {
@@ -605,38 +612,39 @@ fun ProfileScreen(
                                 Spacer(Modifier.height(12.dp))
                                 Text(
                                     text = profile.name,
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = profile.phone,
                                     fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color.White.copy(alpha = 0.8f)
+                                    fontWeight = FontWeight.Normal,
+                                    color = Color.White.copy(alpha = 0.7f)
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 Text(
                                     text = profile.email,
                                     fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color.White.copy(alpha = 0.8f)
+                                    fontWeight = FontWeight.Normal,
+                                    color = Color.White.copy(alpha = 0.7f)
                                 )
                             }
                         }
                     }
                 }
 
-                // Item 2: Promotion Banner (Nestora One Banner)
+                // Item 2: Promotion Banner (Swiggy One Style Banner)
                 item {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 12.dp, bottom = 12.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color.White),
-                        border = BorderStroke(1.dp, Color(0xFFE2EAF2))
+                        border = BorderStroke(1.dp, Color(0xFFEAEAEA))
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -649,41 +657,35 @@ fun ProfileScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = "one",
+                                        text = "Free",
                                         fontSize = 20.sp,
                                         fontWeight = FontWeight.Black,
-                                        color = Color(0xFFFF5252)
+                                        color = Color(0xFF0F7855)
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        text = "Join now",
+                                        text = "ACTIVE",
                                         color = Color.White,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFFFF5252))
+                                            .background(Color(0xFF0F7855))
                                             .padding(horizontal = 8.dp, vertical = 2.dp)
                                     )
                                 }
-                                Text("▼", fontSize = 10.sp, color = NestoraTextMuted)
+                                Text("⌄", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
                             }
                             Text(
-                                text = "Unlimited matches, zero commission & more!",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = Color(0xFF0D1A13)
-                            )
-                            Text(
-                                text = "Join now to unlock exclusive service benefits",
-                                fontSize = 12.sp,
-                                color = NestoraTextMuted
+                                text = "Explore all Nestora Free benefits",
+                                fontSize = 13.sp,
+                                color = Color.Gray
                             )
                         }
                     }
                 }
 
-                // Item 3: Quick Action Cards
+                // Item 3: Quick Action 4-Grid Cards
                 item {
                     Row(
                         modifier = Modifier
@@ -691,64 +693,64 @@ fun ProfileScreen(
                             .padding(horizontal = 16.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        QuickActionCard(Icons.Default.LocationOn, "Address", modifier = Modifier.weight(1f)) {
+                        QuickActionCard(Icons.Outlined.Place, "Address", modifier = Modifier.weight(1f)) {
                             Toast.makeText(context, profile.address?.ifEmpty { "Salt Lake, Sector V, Kolkata" } ?: "Salt Lake, Sector V, Kolkata", Toast.LENGTH_LONG).show()
                         }
-                        QuickActionCard(Icons.Default.ShoppingCart, "Payment Modes", modifier = Modifier.weight(1f)) {
+                        QuickActionCard(Icons.Outlined.ShoppingCart, "Payment Modes", modifier = Modifier.weight(1f)) {
                             Toast.makeText(context, "UPI, Card, Net Banking supported", Toast.LENGTH_SHORT).show()
                         }
-                        QuickActionCard(Icons.Default.Refresh, "My Refunds", modifier = Modifier.weight(1f)) {
+                        QuickActionCard(Icons.Outlined.Refresh, "My Refunds", modifier = Modifier.weight(1f)) {
                             Toast.makeText(context, "Refund history is empty", Toast.LENGTH_SHORT).show()
                         }
-                        QuickActionCard(Icons.Default.Lock, "Nestora Wallet", modifier = Modifier.weight(1f)) {
+                        QuickActionCard(Icons.Outlined.Lock, "Nestora Wallet", modifier = Modifier.weight(1f)) {
                             Toast.makeText(context, "Nestora Wallet Balance: ₹0.00", Toast.LENGTH_LONG).show()
                         }
                     }
                 }
 
-                // Item 4: Vertical List of Premium options
+                // Item 4: Vertical List of Premium options inside a single large white rounded card
                 item {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 16.dp),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color.White),
-                        border = BorderStroke(1.dp, Color(0xFFE2EAF2))
+                        border = BorderStroke(1.dp, Color(0xFFEAEAEA))
                     ) {
                         Column {
-                            VerticalListMenuItem(Icons.Default.Star, "Nestora Platinum Membership") {
+                            VerticalListMenuItem(Icons.Outlined.Star, "Nestora Platinum Membership") {
                                 Toast.makeText(context, "Nestora Platinum features active!", Toast.LENGTH_SHORT).show()
                             }
-                            HorizontalDivider(color = Color(0xFFF7FDFA), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                            HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
                             
-                            VerticalListMenuItem(Icons.Default.Notifications, "My Vouchers") {
+                            VerticalListMenuItem(Icons.Outlined.Notifications, "My Vouchers") {
                                 Toast.makeText(context, "Vouchers list is empty", Toast.LENGTH_SHORT).show()
                             }
-                            HorizontalDivider(color = Color(0xFFF7FDFA), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                            HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
                             
-                            VerticalListMenuItem(Icons.Default.List, "Account Statement") {
+                            VerticalListMenuItem(Icons.Outlined.List, "Account Statement") {
                                 Toast.makeText(context, "Downloading PDF account statement...", Toast.LENGTH_SHORT).show()
                             }
                             if (profile.role.equals("ADMIN", ignoreCase = true)) {
-                                HorizontalDivider(color = Color(0xFFF7FDFA), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
-                                VerticalListMenuItem(Icons.Default.Notifications, "Payment Verification Queue") {
+                                HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                                VerticalListMenuItem(Icons.Outlined.Notifications, "Payment Verification Queue") {
                                     onAdminPayments()
                                 }
                             }
-                            HorizontalDivider(color = Color(0xFFF7FDFA), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                            HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
                             
-                            VerticalListMenuItem(Icons.Default.FavoriteBorder, "My Shortlists") {
+                            VerticalListMenuItem(Icons.Outlined.FavoriteBorder, "My Shortlists") {
                                 Toast.makeText(context, "Shortlisted items list is empty", Toast.LENGTH_SHORT).show()
                             }
-                            HorizontalDivider(color = Color(0xFFF7FDFA), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                            HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
                             
-                            VerticalListMenuItem(Icons.Default.Favorite, "Favourites") {
+                            VerticalListMenuItem(Icons.Outlined.FavoriteBorder, "Favourites") {
                                 Toast.makeText(context, "Favourite services and providers", Toast.LENGTH_SHORT).show()
                             }
-                            HorizontalDivider(color = Color(0xFFF7FDFA), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                            HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
                             
-                            VerticalListMenuItem(Icons.Default.Share, "Partner Rewards") {
+                            VerticalListMenuItem(Icons.Outlined.Share, "Partner Rewards") {
                                 Toast.makeText(context, "Nestora partners overview", Toast.LENGTH_SHORT).show()
                             }
                         }
@@ -898,39 +900,34 @@ fun QuickActionCard(
 ) {
     Card(
         modifier = modifier
-            .height(84.dp)
+            .aspectRatio(1f)
             .clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFE2EAF2).copy(alpha = 0.8f))
+        border = BorderStroke(1.dp, Color(0xFFEAEAEA))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(8.dp),
-            horizontalAlignment = Alignment.Start,
-            verticalArrangement = Arrangement.SpaceBetween
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFF0FDF8)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = Color(0xFF6B7A75),
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = Color.Black,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = label,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0D1A13),
-                lineHeight = 13.sp
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF2A2A2A),
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -949,32 +946,24 @@ fun VerticalListMenuItem(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xFFF0FDF8)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = Color(0xFF6B7A75),
-                modifier = Modifier.size(20.dp)
-            )
-        }
-        Spacer(Modifier.width(14.dp))
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = Color(0xFF2A2A2A),
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(Modifier.width(12.dp))
         Text(
             text = label,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = Color(0xFF0D1A13),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFF2A2A2A),
             modifier = Modifier.weight(1f)
         )
         Icon(
             imageVector = Icons.Default.KeyboardArrowRight,
             contentDescription = null,
-            tint = NestoraTextMuted,
+            tint = Color(0xFFB0B0B0),
             modifier = Modifier.size(18.dp)
         )
     }

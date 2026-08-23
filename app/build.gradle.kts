@@ -1,8 +1,27 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.google.services)
 }
+
+// Dynamic colour rotation is deliberately opt-in. A normal developer/CI build
+// retains the original Nestora mint palette unless the switch is explicitly
+// enabled. Environment variable takes precedence over gradle.properties, then
+// local.properties (which is convenient for an individual developer device).
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.isFile) {
+        localPropertiesFile.inputStream().use(::load)
+    }
+}
+val dynamicThemeValue = providers.environmentVariable("NESTORA_DYNAMIC_THEME").orNull
+    ?: providers.gradleProperty("NESTORA_DYNAMIC_THEME").orNull
+    ?: localProperties.getProperty("NESTORA_DYNAMIC_THEME")
+val dynamicThemeEnabled = dynamicThemeValue
+    ?.trim()
+    ?.lowercase() in setOf("true", "1", "yes", "on")
 
 android {
     namespace = "com.estatenestora.app"
@@ -16,12 +35,25 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("boolean", "DYNAMIC_THEME_ENABLED", dynamicThemeEnabled.toString())
         vectorDrawables {
             useSupportLibrary = true
         }
     }
 
+    signingConfigs {
+        create("debugConfig") {
+            storeFile = file("${rootDir}/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debugConfig")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -39,6 +71,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
@@ -85,6 +118,7 @@ dependencies {
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
+    testImplementation("junit:junit:4.13.2")
 
     // TDLib (MTProto) — lets the app act as a real Telegram *user*, not the bot,
     // so it can send/receive via Dev1 Bot without the getUpdates 409 / self-echo

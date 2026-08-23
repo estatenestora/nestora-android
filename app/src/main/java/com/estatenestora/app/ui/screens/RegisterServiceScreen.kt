@@ -856,7 +856,7 @@ fun RegisterServiceScreen(
                                         isSuccess = true
                                     } else {
                                         errorMessage = response?.reply
-                                            ?: "Could not reach Nestora. Please try again."
+                                            ?: "Nestora did not receive all listing details. Please tap Register again; no listing was created."
                                     }
                                 }
                             }
