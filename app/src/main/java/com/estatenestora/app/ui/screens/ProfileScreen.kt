@@ -1,5 +1,6 @@
-﻿package com.estatenestora.app.ui.screens
+package com.estatenestora.app.ui.screens
 
+import com.estatenestora.app.ui.components.ProjectFooter
 import android.widget.Toast
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -507,6 +508,7 @@ fun ProfileScreen(
                     }
 
                     item { Spacer(Modifier.height(32.dp)) }
+                    item { ProjectFooter() }
                 }
             }
         } else {
@@ -758,6 +760,7 @@ fun ProfileScreen(
                 }
 
                 item { Spacer(Modifier.height(32.dp)) }
+                item { ProjectFooter() }
             }
         }
 

@@ -9,7 +9,8 @@ data class Category(
     val name: String,
     val emoji: String,
     val description: String,
-    val servicesCount: Int = 0
+    val servicesCount: Int = 0,
+    @SerializedName("is_active") val isActive: Boolean = true
 )
 
 data class ServiceType(
@@ -17,7 +18,8 @@ data class ServiceType(
     val name: String,
     val emoji: String,
     val description: String,
-    val categorySlug: String
+    val categorySlug: String,
+    @SerializedName("is_active") val isActive: Boolean = true
 )
 
 data class ServiceListing(

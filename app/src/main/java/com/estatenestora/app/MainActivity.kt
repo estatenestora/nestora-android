@@ -54,7 +54,7 @@ import com.estatenestora.app.data.repository.NestoraRepository
 import com.estatenestora.app.data.telegram.TdLibManager
 import com.estatenestora.app.ui.auth.TelegramAuthScreen
 import com.estatenestora.app.ui.screens.AIChatScreen
-import com.estatenestora.app.ui.screens.BookingCreateSheet
+import com.estatenestora.app.ui.screens.AdaptiveBookingSheet
 import com.estatenestora.app.ui.screens.BookingLoaderScreen
 import com.estatenestora.app.ui.screens.BookingDetailScreen
 import com.estatenestora.app.ui.screens.BookingsScreen
@@ -152,6 +152,15 @@ class MainActivity : ComponentActivity() {
                 var userLocation by remember { 
                     mutableStateOf(prefs.getString("user_location", "Salt Lake, Sector V")) 
                 }
+                // These coordinates belong to the location shown in the address bar.  They are
+                // deliberately separate from transient device GPS so Finder always searches the
+                // place the customer selected, including after an app restart.
+                var addressBarLatitude by remember {
+                    mutableStateOf(prefs.getString("address_bar_latitude", null)?.toDoubleOrNull())
+                }
+                var addressBarLongitude by remember {
+                    mutableStateOf(prefs.getString("address_bar_longitude", null)?.toDoubleOrNull())
+                }
 
                 val authState by TdLibManager.authState.collectAsState()
 
@@ -183,7 +192,7 @@ class MainActivity : ComponentActivity() {
 
                 // Automatically fetch and geocode GPS location on app start / permission grant
                 LaunchedEffect(locationGranted) {
-                    if (locationGranted && com.estatenestora.app.util.isSystemLocationEnabled(context)) {
+                    if (locationGranted && addressBarLatitude == null && addressBarLongitude == null && com.estatenestora.app.util.isSystemLocationEnabled(context)) {
                         try {
                             val loc = com.estatenestora.app.util.getCurrentLocation(context)
                             if (loc != null) {
@@ -191,7 +200,13 @@ class MainActivity : ComponentActivity() {
                                 if (place != null) {
                                     val formatted = if (place.subtitle.isNotBlank()) "${place.title}, ${place.subtitle}" else place.title
                                     userLocation = formatted
-                                    prefs.edit().putString("user_location", userLocation).apply()
+                                    addressBarLatitude = loc.latitude
+                                    addressBarLongitude = loc.longitude
+                                    prefs.edit()
+                                        .putString("user_location", userLocation)
+                                        .putString("address_bar_latitude", loc.latitude.toString())
+                                        .putString("address_bar_longitude", loc.longitude.toString())
+                                        .apply()
                                 }
                             }
                         } catch (e: Exception) {
@@ -222,7 +237,13 @@ class MainActivity : ComponentActivity() {
                         onManualLocation = { city ->
                             prefs.edit().putBoolean("location_granted", true).apply()
                             userLocation = city
-                            prefs.edit().putString("user_location", userLocation).apply()
+                            addressBarLatitude = null
+                            addressBarLongitude = null
+                            prefs.edit()
+                                .putString("user_location", userLocation)
+                                .remove("address_bar_latitude")
+                                .remove("address_bar_longitude")
+                                .apply()
                             locationGranted = true
                         },
                         onBack = {
@@ -250,31 +271,32 @@ class MainActivity : ComponentActivity() {
                     return@NestoraTheme
                 }
 
-                var activeScreen by remember { mutableStateOf("main") }
-                var selectedTab by remember { mutableStateOf(0) } // Default to Explore tab
                 var isProviderMode by remember { mutableStateOf(prefs.getBoolean("provider_mode", false)) }
+                var activeScreen by remember { mutableStateOf(if (isProviderMode) "register_choice" else "main") }
+                var selectedTab by remember { mutableStateOf(if (isProviderMode) 0 else 1) } // Default to Finder (1st tab in Hire mode)
                 val onModeToggle = {
                     isProviderMode = !isProviderMode
                     prefs.edit().putBoolean("provider_mode", isProviderMode).apply()
                     if (isProviderMode) {
-                        // Switched to Provider: Finder (tab 1) is not allowed
-                        if (selectedTab == 1) {
-                            selectedTab = 0 // default to Explore
+                        // Switched to Provider: Explore (0) and Finder (1) are not allowed
+                        if (selectedTab == 0 || selectedTab == 1) {
+                            selectedRegisterTab = 0
+                            activeScreen = "register_choice"
                         }
                     } else {
                         // Switched to Customer: Register is not allowed
                         if (activeScreen == "register_choice" || activeScreen == "register_service" || activeScreen == "auto_register") {
                             activeScreen = "main"
-                            selectedTab = 0 // default to Explore
+                            selectedTab = 1 // default to Finder (1st tab in Hire mode)
                         }
                     }
                 }
                 val fullTabsList = remember {
                     listOf(
-                        com.estatenestora.app.ui.theme.NestoraTab("explore", "Explore", "🧭", visibleInHireMode = true, visibleInServeMode = true),
                         com.estatenestora.app.ui.theme.NestoraTab("finder", "Finder", "🔍", visibleInHireMode = true, visibleInServeMode = false),
                         com.estatenestora.app.ui.theme.NestoraTab("register", "Register", "🧰", visibleInHireMode = false, visibleInServeMode = true),
-                        com.estatenestora.app.ui.theme.NestoraTab("bookings", "Bookings", "🧾", visibleInHireMode = true, visibleInServeMode = true)
+                        com.estatenestora.app.ui.theme.NestoraTab("bookings", "Bookings", "🧾", visibleInHireMode = true, visibleInServeMode = true),
+                        com.estatenestora.app.ui.theme.NestoraTab("explore", "Explore", "🧭", visibleInHireMode = true, visibleInServeMode = false)
                     )
                 }
                 val activeTabsList = remember(isProviderMode) {
@@ -357,6 +379,8 @@ class MainActivity : ComponentActivity() {
                     return sdf.format(java.util.Date())
                 }
                 var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
+                var feedListings by remember { mutableStateOf<List<ServiceListing>>(emptyList()) }
+                var isLoadingFeed by remember { mutableStateOf(false) }
                 val bookings by bookingPolling.bookings.collectAsState()
                 val bookingDetail by bookingPolling.detail.collectAsState()
                 var shownAnimationBookingIds by remember { mutableStateOf(setOf<String>()) }
@@ -390,11 +414,18 @@ class MainActivity : ComponentActivity() {
 
                 var bookingSheetListing by remember { mutableStateOf<ServiceListing?>(null) }
 
-                var currentLat by remember { mutableStateOf(0.0) }
-                var currentLon by remember { mutableStateOf(0.0) }
+                var currentLat by remember { mutableStateOf(addressBarLatitude ?: 0.0) }
+                var currentLon by remember { mutableStateOf(addressBarLongitude ?: 0.0) }
 
+<<<<<<< Updated upstream
+                // Keep the development booking flow intact: resolve the booking
+                // coordinates when the customer actually opens Book Now.
                 LaunchedEffect(locationGranted, bookingSheetListing) {
                     if (locationGranted && bookingSheetListing != null) {
+=======
+                LaunchedEffect(locationGranted) {
+                    if (locationGranted) {
+>>>>>>> Stashed changes
                         try {
                             val loc = com.estatenestora.app.util.getCurrentLocation(context)
                             if (loc != null) {
@@ -404,8 +435,41 @@ class MainActivity : ComponentActivity() {
                         } catch (e: Exception) {}
                     }
                 }
+<<<<<<< Updated upstream
+                LaunchedEffect(addressBarLatitude, addressBarLongitude, authState) {
+=======
+                LaunchedEffect(currentLat, currentLon, authState) {
+>>>>>>> Stashed changes
+                    if (authState is TdLibManager.AuthState.Ready) {
+                        try {
+                            isLoadingFeed = true
+                            val feedResp = repository.getFeedListings(
+<<<<<<< Updated upstream
+                                addressBarLatitude = addressBarLatitude,
+                                addressBarLongitude = addressBarLongitude
+=======
+                                addressBarLatitude = if (currentLat != 0.0) currentLat else null,
+                                addressBarLongitude = if (currentLon != 0.0) currentLon else null
+>>>>>>> Stashed changes
+                            )
+                            feedListings = feedResp?.listings?.map { it.toServiceListing() } ?: emptyList()
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Failed to load feed listings", e)
+                        } finally {
+                            isLoadingFeed = false
+                        }
+                    }
+                }
 
-                BackHandler(enabled = activeScreen != "main" || selectedTab != 0) {
+                val defaultBackActiveScreen = if (isProviderMode) "register_choice" else "main"
+                val defaultBackSelectedTab = if (isProviderMode) 0 else 1
+                val isBackEnabled = if (isProviderMode) {
+                    activeScreen != "register_choice" || selectedRegisterTab != 0
+                } else {
+                    activeScreen != "main" || selectedTab != 1
+                }
+
+                BackHandler(enabled = isBackEnabled) {
                     if (activeScreen == "booking_detail") {
                         bookingPolling.closeDetail()
                         selectedBookingId = null
@@ -420,14 +484,21 @@ class MainActivity : ComponentActivity() {
                             activeScreen = "main"
                         }
                     } else if (activeScreen == "register_choice" || activeScreen == "register_service" || activeScreen == "auto_register") {
-                        activeScreen = "main"
-                        selectedTab = 3
+                        if (isProviderMode) {
+                            if (activeScreen == "register_service" || activeScreen == "auto_register" || selectedRegisterTab != 0) {
+                                selectedRegisterTab = 0
+                                activeScreen = "register_choice"
+                            }
+                        } else {
+                            activeScreen = "main"
+                            selectedTab = 1
+                        }
                     } else if (activeScreen == "booking_loader") {
                         activeScreen = "main"
-                    } else if (activeScreen == "main" && selectedTab != 0) {
-                        selectedTab = 0
+                    } else if (activeScreen == "main" && selectedTab != defaultBackSelectedTab) {
+                        selectedTab = defaultBackSelectedTab
                     } else {
-                        activeScreen = "main"
+                        activeScreen = defaultBackActiveScreen
                     }
                 }
 
@@ -500,7 +571,7 @@ class MainActivity : ComponentActivity() {
                         // Start list polling as soon as we're logged in, not only
                         // when the Bookings tab is opened — the sticky running-
                         // booking banner needs live data everywhere else too.
-                        bookingPolling.startListPolling()
+                        bookingPolling.setSessionActive(true)
 
                         // Fetch FCM token and register it
                         try {
@@ -645,8 +716,25 @@ class MainActivity : ComponentActivity() {
                             onReverseGeocode = { lat, lon -> repository.reverseGeocode(lat, lon) },
                             onLocationConfirmed = { title, sub, lat, lon ->
                                 val loc = "$title, $sub"
-                                prefs.edit().putString("user_location", loc).apply()
+                                addressBarLatitude = lat
+                                addressBarLongitude = lon
+                                prefs.edit()
+                                    .putString("user_location", loc)
+                                    .apply {
+                                        if (lat != null && lon != null) {
+                                            putString("address_bar_latitude", lat.toString())
+                                            putString("address_bar_longitude", lon.toString())
+                                        } else {
+                                            remove("address_bar_latitude")
+                                            remove("address_bar_longitude")
+                                        }
+                                    }
+                                    .apply()
                                 userLocation = loc
+                                if (lat != null && lon != null) {
+                                    currentLat = lat
+                                    currentLon = lon
+                                }
                                 if (mapPickerSource == "register_choice") {
                                      pendingMapLocationToSend = if (lat != null && lon != null) {
                                          "$loc||$lat,$lon"
@@ -712,6 +800,19 @@ class MainActivity : ComponentActivity() {
                             userPhotoPath = userPhotoPath,
                             profileName = profile?.name,
                             onFetchMyListings = { repository.getMyListings() },
+                            onSetProviderAvailability = { listingId, preset ->
+                                repository.setProviderAvailability(listingId, preset)
+                            },
+                            onSetCustomProviderAvailability = { listingId, daysCsv, startTime, endTime ->
+                                repository.setCustomProviderAvailability(listingId, daysCsv, startTime, endTime)
+                            },
+                            onSetListingActive = { listingId, active ->
+                                repository.setListingActive(listingId, active)
+                            },
+                            onUpdateListing = { listingId, title, description, price, location, city, lat, lon ->
+                                repository.updateListing(listingId, title, description, price, location, city, lat, lon)
+                            },
+                            onSaveListingEditor = { update -> repository.saveListingEditor(update) },
                             isProviderMode = isProviderMode,
                             onModeToggle = onModeToggle,
                             tabsList = activeTabsList,
@@ -916,8 +1017,8 @@ class MainActivity : ComponentActivity() {
                                 when (selectedTab) {
                                     0 -> HomeScreen(
                                         categories = categories,
-                                        listings = emptyList(),
-                                        onListingClick = { selectedTab = 1; selectedFinderTab = 1 },
+                                        listings = feedListings,
+                                        onListingClick = { listing -> bookingSheetListing = listing },
                                         onSearchClick = { selectedTab = 1; selectedFinderTab = 1 },
                                         onCategorySelected = { cat ->
                                             selectedTab = 1
@@ -937,9 +1038,10 @@ class MainActivity : ComponentActivity() {
                                          isProviderMode = isProviderMode,
                                          onModeToggle = onModeToggle,
                                          tabsList = activeTabsList,
-                                         selectedTabId = selectedTabId,
-                                         onTabSelected = onTabSelected,
-                                         currentTheme = todayTheme
+                                        selectedTabId = selectedTabId,
+                                        onTabSelected = onTabSelected,
+                                        currentTheme = todayTheme,
+                                        isLoadingFeed = isLoadingFeed
                                     )
 
                                     4 -> CategoriesScreen(
@@ -1004,7 +1106,29 @@ class MainActivity : ComponentActivity() {
                                           tabsList = activeTabsList,
                                           selectedTabId = selectedTabId,
                                           onTabSelected = onTabSelected,
-                                          currentTheme = todayTheme
+                                          currentTheme = todayTheme,
+                                          listings = feedListings,
+                                          isLoadingFeed = isLoadingFeed,
+                                          onRefreshFeed = {
+                                              lifecycleScope.launch {
+                                                  if (isLoadingFeed) return@launch
+                                                  isLoadingFeed = true
+                                                  try {
+                                                      feedListings = repository.getFeedListings(
+                                                          addressBarLatitude = addressBarLatitude,
+                                                          addressBarLongitude = addressBarLongitude
+                                                      )?.listings?.map { it.toServiceListing() } ?: emptyList()
+                                                  } finally {
+                                                      isLoadingFeed = false
+                                                  }
+                                              }
+                                          },
+                                          onListingClick = { listing -> bookingSheetListing = listing },
+                                          onFetchLocationListings = { location ->
+                                              repository.chat(
+                                                  query = "find service providers in $location"
+                                              )?.listings.orEmpty().map { it.toServiceListing() }
+                                          }
                                      )
 
                                     2 -> BookingsScreen(
@@ -1339,7 +1463,7 @@ class MainActivity : ComponentActivity() {
                 // re-seeds from pendingBookingAddress/Lat/Lon below.
                 if (activeScreen != "map_picker") {
                 bookingSheetListing?.let { listing ->
-                    BookingCreateSheet(
+                    AdaptiveBookingSheet(
                         listing = listing,
                         initialLocationText = pendingBookingAddress ?: userLocation ?: "Salt Lake, Sector V",
                         initialLat = pendingBookingLat ?: currentLat,
@@ -1354,10 +1478,25 @@ class MainActivity : ComponentActivity() {
                             mapPickerSource = "booking_create"
                             activeScreen = "map_picker"
                         },
-                        onFetchQuote = { listingId -> repository.getBookingQuote(listingId) },
-                        onConfirmBooking = { listingId, isHome, lat, lon, addr ->
-                            repository.createBooking(listingId, isHome, lat, lon, addr)
+                        onFetchPolicy = { listingId -> repository.getBookingPolicyResponse(listingId) },
+                        onFetchAvailability = { listingId -> repository.getListingAvailabilityResponse(listingId) },
+                        onCreateDraft = { listingId, idempotencyKey ->
+                            repository.createEngagementDraft(listingId, idempotencyKey)
                         },
+                        onSetLocation = { draftId, isHome, lat, lon, address ->
+                            repository.setEngagementDraftLocation(draftId, isHome, lat, lon, address)
+                        },
+                        onSetSchedule = { draftId, startAt, endAt, recurrence ->
+                            repository.setEngagementDraftSchedule(draftId, startAt, endAt, recurrence)
+                        },
+                        onSetTimePreference = { draftId, term, preference ->
+                            repository.setEngagementDraftTimePreference(draftId, term, preference)
+                        },
+                        onSetNote = { draftId, note -> repository.setEngagementDraftNote(draftId, note) },
+                        onSetAnswer = { draftId, key, value ->
+                            repository.setEngagementDraftAnswer(draftId, key, value)
+                        },
+                        onSubmit = { draftId -> repository.submitEngagementDraft(draftId) },
                         onBookingCreated = { bookingId ->
                             loaderListingTitle = listing.title
                             loaderAddressText = if (userLocation?.isNotBlank() == true) userLocation ?: "" else "Center Appointment"

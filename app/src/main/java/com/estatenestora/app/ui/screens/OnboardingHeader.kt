@@ -33,7 +33,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
@@ -57,6 +56,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 
 @Composable
 fun MicIcon(color: Color, modifier: Modifier = Modifier) {
@@ -236,12 +236,14 @@ fun OnboardingTopBar(
             // creates visible stripes where those sections meet.
             .background(currentTheme.backgroundGradient.first())
             .statusBarsPadding()
-            .padding(top = 8.dp, bottom = 12.dp, start = 16.dp, end = 16.dp)
+            .padding(top = 8.dp, bottom = 0.dp)
     ) {
         Column {
             // ── TOP BAR: NESTORA LOGO & ADDRESS WITH ALWAYS-VISIBLE DROPDOWN & GREY PROFILE ICON ──
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -362,24 +364,40 @@ fun OnboardingTopBar(
 
             Spacer(Modifier.height(16.dp))
 
-            // Every visible top-menu item shares the available screen width.
-            // Adding another enabled tab later therefore reduces each card
-            // proportionally instead of leaving a gap or requiring horizontal
-            // scrolling.
-            Row(
+            Box(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                contentAlignment = Alignment.BottomCenter
             ) {
-                tabsList.forEach { tab ->
-                    val isActive = tab.id == selectedTabId
-                    MenuTabCard(
-                        tab = tab,
-                        isActive = isActive,
-                        theme = currentTheme,
-                        compact = tabsList.size >= 4,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onTabSelected(tab.id) }
-                    )
+                // 1. Draw the baseline selected-colour rail first (so it is at the very bottom and drawn underneath)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(selectedMenuSurface(currentTheme))
+                )
+
+                // 2. Draw the tabs on top of the rail
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp),
+                    // A narrow seam plus the rounded top corners creates the
+                    // Swiggy-style V separation while every tab still meets the
+                    // same lower colour rail.
+                    horizontalArrangement = Arrangement.spacedBy(1.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    tabsList.forEach { tab ->
+                        val isActive = tab.id == selectedTabId
+                        MenuTabCard(
+                            tab = tab,
+                            isActive = isActive,
+                            theme = currentTheme,
+                            compact = tabsList.size >= 4,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onTabSelected(tab.id) }
+                        )
+                    }
                 }
             }
         }
@@ -395,36 +413,52 @@ fun MenuTabCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    // A pale version of the active header color: it highlights the current
-    // section without looking like an unrelated white card.
-    val lightThemeHighlight = remember(theme) {
-        lerp(theme.backgroundGradient.last(), Color.White, 0.86f)
+    val layer = topMenuLayer(isActive)
+    // The active destination is an inverted Swiggy-style tab. Its flat lower
+    // edge joins the selected canvas immediately below this header.
+    val tabShape = if (isActive) {
+        RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
+    } else {
+        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
     }
-    // Hardware-accelerated UI state interpolation
     val scaleFactor by animateFloatAsState(
-        targetValue = if (isActive) 1.04f else 1.0f,
-        animationSpec = tween(durationMillis = 200),
+        targetValue = layer.scale,
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
         label = "TabScaleAnimation"
+    )
+    val alpha by animateFloatAsState(
+        targetValue = layer.alpha,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "TabLayerAlpha"
     )
 
     val cardBgColor by animateColorAsState(
-        targetValue = if (isActive) lightThemeHighlight else theme.inactiveTabCardBg,
+        targetValue = topMenuTabBackground(theme, isActive),
         animationSpec = tween(durationMillis = 250),
         label = "TabColorAnimation"
     )
 
     val contentColor by animateColorAsState(
-        targetValue = if (isActive) Color(0xFF111111) else Color(0xCCFFFFFF),
+        targetValue = Color.White.copy(alpha = if (isActive) 1f else 0.95f),
         animationSpec = tween(durationMillis = 250),
         label = "TabTextColorAnimation"
     )
 
     Column(
         modifier = modifier
+            .zIndex(layer.zIndex)
             .scale(scaleFactor)
-            .height(if (compact) 64.dp else 68.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .height(
+                when {
+                    isActive && compact -> 62.dp
+                    isActive -> 66.dp
+                    compact -> 60.dp
+                    else -> 64.dp
+                }
+            )
+            .clip(tabShape)
             .background(cardBgColor)
+            .graphicsLayer { this.alpha = alpha }
             .clickable { onClick() }
             .padding(vertical = if (compact) 6.dp else 8.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -432,14 +466,17 @@ fun MenuTabCard(
     ) {
         Text(
             text = tab.iconEmoji,
-            fontSize = if (compact) 19.sp else 22.sp,
-            modifier = Modifier.padding(bottom = if (compact) 3.dp else 6.dp)
+            fontSize = if (compact) 20.sp else 23.sp,
+            modifier = Modifier
+                .scale(if (isActive) 1.10f else 1f)
+                .offset(y = if (isActive) (-1).dp else 0.dp)
+                .padding(bottom = if (compact) 2.5.dp else 5.dp)
         )
         Text(
             text = tab.label.uppercase(),
             color = contentColor,
-            fontSize = if (compact) 8.sp else 9.5.sp,
-            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+            fontSize = if (compact) 8.5.sp else 10.sp,
+            fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
             letterSpacing = if (compact) 0.2.sp else 0.5.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -457,11 +494,13 @@ fun OnboardingSearchBar(
     currentTheme: RoyalTheme = remember { RoyalThemeRepository.getThemeForToday() }
 ) {
     val focusRequester = remember { FocusRequester() }
-    // Keep the search field visually connected to the selected tab while the
-    // header is resting. It returns to white only when pinned on scroll.
-    val lightThemeHighlight = remember(currentTheme) {
-        lerp(currentTheme.backgroundGradient.last(), Color.White, 0.86f)
-    }
+    // The resting field sits on the same selected-menu surface that begins
+    // below the raised top tab. It returns to a plain white sticky header on
+    // scroll, where it is no longer part of that navigation composition.
+    val lightThemeHighlight = remember(currentTheme) { selectedMenuSurface(currentTheme) }
+    // The field deliberately stays white across every theme. Keeping its
+    // contents in the header colour preserves contrast without introducing a
+    // second coloured strip below the navigation.
     val searchContentColor = currentTheme.backgroundGradient.first()
     // Only apply status-bar top padding when the search bar is pinned to the very top of
     // the screen (isScrolled=true). When it sits below OnboardingTopBar (isScrolled=false)
@@ -475,19 +514,19 @@ fun OnboardingSearchBar(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (isScrolled) Color.White else currentTheme.backgroundGradient.first())
+            .background(if (isScrolled) Color.White else lightThemeHighlight)
             .padding(
                 start = 16.dp,
                 end = 16.dp,
                 bottom = if (isScrolled) 12.dp else (if (hasCarouselBelow) 8.dp else 24.dp),
-                top = statusBarTopPadding + (if (isScrolled) 8.dp else 0.dp)
+                top = statusBarTopPadding + (if (isScrolled) 8.dp else 12.dp)
             )
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(46.dp)
-                .border(1.2.dp, Color(0xFFE2EAF2), RoundedCornerShape(12.dp))
+                .border(1.2.dp, Color.White, RoundedCornerShape(12.dp))
                 .clickable {
                     if (onClick != null) {
                         onClick()
@@ -496,7 +535,7 @@ fun OnboardingSearchBar(
                     }
                 },
             shape = RoundedCornerShape(12.dp),
-            color = if (isScrolled) Color.White else lightThemeHighlight
+            color = Color.White
         ) {
             Row(
                 modifier = Modifier
