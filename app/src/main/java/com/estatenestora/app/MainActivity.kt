@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -163,32 +164,6 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val authState by TdLibManager.authState.collectAsState()
-
-                // 0. Startup Splash Gate (Figma Page 1 & 2)
-                // Prevent login/auth screen from flashing briefly while TDLib is initializing its session
-                if (authState is TdLibManager.AuthState.Uninitialized) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFF005E46)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "Nestora",
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White
-                            )
-                            Spacer(Modifier.height(16.dp))
-                            CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(36.dp))
-                        }
-                    }
-                    return@NestoraTheme
-                }
 
                 // Automatically fetch and geocode GPS location on app start / permission grant
                 LaunchedEffect(locationGranted) {
@@ -561,21 +536,44 @@ class MainActivity : ComponentActivity() {
 
                         // Fetch FCM token and register it
                         try {
+                            // Register cached token first if available
+                            val cachedToken = prefs.getString("fcm_token", null)
+                            if (!cachedToken.isNullOrBlank()) {
+                                scope.launch {
+                                    try {
+                                        repository.registerFcmToken(cachedToken)
+                                    } catch (e: Exception) {
+                                        Log.e("MainActivity", "Failed to register cached FCM token with backend", e)
+                                    }
+                                }
+                            }
+
                             com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                                 .addOnCompleteListener { task ->
                                     if (task.isSuccessful) {
                                         val token = task.result
-                                        Log.i("MainActivity", "FCM token retrieved: $token")
-                                        prefs.edit().putString("fcm_token", token).apply()
-                                        scope.launch {
-                                            try {
-                                                repository.registerFcmToken(token)
-                                            } catch (e: Exception) {
-                                                Log.e("MainActivity", "Failed to register FCM token with backend", e)
+                                        if (!token.isNullOrBlank()) {
+                                            Log.i("MainActivity", "FCM token retrieved: $token")
+                                            prefs.edit().putString("fcm_token", token).apply()
+                                            scope.launch {
+                                                try {
+                                                    repository.registerFcmToken(token)
+                                                } catch (e: Exception) {
+                                                    Log.e("MainActivity", "Failed to register FCM token with backend", e)
+                                                }
                                             }
                                         }
                                     } else {
-                                        Log.w("MainActivity", "FCM token fetch failed", task.exception)
+                                        val exception = task.exception
+                                        Log.w("MainActivity", "FCM token fetch failed: ${exception?.message}")
+                                        // On registration overflow or stale instance ID, attempt token cleanup
+                                        if (exception?.message?.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true) == true) {
+                                            try {
+                                                com.google.firebase.messaging.FirebaseMessaging.getInstance().deleteToken()
+                                            } catch (delEx: Exception) {
+                                                Log.w("MainActivity", "Failed to delete stale FCM token", delEx)
+                                            }
+                                        }
                                     }
                                 }
                         } catch (e: Exception) {
@@ -595,6 +593,22 @@ class MainActivity : ComponentActivity() {
                             if (categories.isEmpty()) {
                                 attempts++
                                 kotlinx.coroutines.delay(3000)
+                            }
+                        }
+
+                        // Load initial feed of service providers for HIRE mode
+                        scope.launch {
+                            try {
+                                isLoadingFeed = true
+                                val feedResp = repository.getFeedListings(
+                                    addressBarLatitude = if (currentLat != 0.0) currentLat else null,
+                                    addressBarLongitude = if (currentLon != 0.0) currentLon else null
+                                )
+                                feedListings = feedResp?.listings?.map { it.toServiceListing() } ?: emptyList()
+                            } catch (e: Exception) {
+                                Log.e("MainActivity", "Failed to load feed listings", e)
+                            } finally {
+                                isLoadingFeed = false
                             }
                         }
                     } else {
@@ -623,8 +637,24 @@ class MainActivity : ComponentActivity() {
                 // above already gave up — try again whenever the user visits
                 // Explore and still has nothing to show.
                 LaunchedEffect(selectedTab) {
-                    if (selectedTab == 0 && categories.isEmpty() && authState is TdLibManager.AuthState.Ready) {
-                        categories = repository.getCategories()
+                    if (selectedTab == 0 && authState is TdLibManager.AuthState.Ready) {
+                        if (categories.isEmpty()) {
+                            categories = repository.getCategories()
+                        }
+                        if (feedListings.isEmpty() && !isLoadingFeed) {
+                            try {
+                                isLoadingFeed = true
+                                val feedResp = repository.getFeedListings(
+                                    addressBarLatitude = if (currentLat != 0.0) currentLat else null,
+                                    addressBarLongitude = if (currentLon != 0.0) currentLon else null
+                                )
+                                feedListings = feedResp?.listings?.map { it.toServiceListing() } ?: emptyList()
+                            } catch (e: Exception) {
+                                Log.e("MainActivity", "Failed to refresh feed listings", e)
+                            } finally {
+                                isLoadingFeed = false
+                            }
+                        }
                     }
                 }
 

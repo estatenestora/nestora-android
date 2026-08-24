@@ -1,0 +1,6 @@
+{
+  "name": "Nestora",
+  "description": "Real estate and home services app imported from GitHub repository estatenestora/nestora-android.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

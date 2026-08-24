@@ -12,7 +12,8 @@
     <application
         android:name=".NestoraApplication"
         android:allowBackup="true"
-        android:icon="@android:drawable/sym_def_app_icon"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Nestora"
         android:supportsRtl="true"
         android:theme="@style/Theme.Nestora"
@@ -39,6 +40,16 @@
         </service>
 
         <!-- Nestora FCM service for data-only notifications -->
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+        <meta-data
+            android:name="firebase_analytics_collection_deactivated"
+            android:value="true" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="booking_updates" />
+
         <service
             android:name=".fcm.NestoraFirebaseMessagingService"
             android:exported="false">
