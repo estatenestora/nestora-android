@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="112dp"
+    android:height="20dp"
+    android:viewportWidth="112"
+    android:viewportHeight="20">
+    <!-- The text "NESTORA" in brand green/teal color (#00966B) -->
+    <path
+        android:fillColor="#00966B"
+        android:pathData="M 5,2 h 2.5 l 6,12.5 V 2 h 2.5 v 16 h -2.5 l -6,-12.5 V 18 H 5 Z M 20,2 h 10.5 v 2.5 H 22.5 v 4 h 8 v 2.5 h -8 v 4.5 h 10.5 v 2.5 H 20 Z M 34,2 h 11 v 2.5 H 36.5 v 2 h 8.5 v 7 H 34 v -2.5 h 8.5 v -2 H 34 z M 34,15.5 h 11 v 2.5 H 34 z M 49,2 h 11 v 2.5 h -4.25 v 13.5 h -2.5 V 4.5 H 49 Z M 64,2 h 11 v 16 H 64 Z M 66.5,4.5 v 11 h 6 v -11 Z M 79,2 h 9 a 4.5,4.5 0 0 1 4.5,4.5 v 2.5 a 4.5,4.5 0 0 1 -4.5,4.5 h -6.5 v 4.5 h 6.5 L 93,18 h -3.5 l -4.5,-6.5 H 81.5 V 18 H 79 Z M 81.5,4.5 v 4.5 h 6.5 a 2.25,2.25 0 0 0 2.25,-2.25 v 0 a 2.25,2.25 0 0 0 -2.25,-2.25 Z M 95,18 L 100,2 h 2.5 l 5,16 h -2.75 l -1.25,-4.5 h -6.5 l -1.25,4.5 Z M 97.75,11 h 5.25 L 101.25,5.5 Z" />
+</vector>
