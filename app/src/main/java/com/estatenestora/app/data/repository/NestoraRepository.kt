@@ -13,6 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.drinkless.tdlib.TdApi
 import java.io.ByteArrayInputStream
@@ -49,6 +51,19 @@ import java.util.zip.GZIPInputStream
 class NestoraRepository {
 
     private val gson = Gson()
+    private val discoveryRequestMutex = Mutex()
+    private val discoveryCache = mutableMapOf<String, CachedDiscoveryResponse>()
+    private val discoveryFailures = mutableMapOf<String, DiscoveryFailure>()
+
+    private data class CachedDiscoveryResponse(
+        val response: AndroidBridgeResponse,
+        val cachedAtMs: Long
+    )
+
+    private data class DiscoveryFailure(
+        val occurredAtMs: Long,
+        val consecutiveFailures: Int
+    )
 
     companion object {
         // Runs the calibration probe at most once per process. A fresh probe
@@ -483,6 +498,63 @@ class NestoraRepository {
         }
     }
 
+    /**
+     * Serves successful discovery data from a short-lived cache and coalesces
+     * recovery attempts. A server outage therefore cannot turn every category
+     * tap into another bridge request, but the first meaningful tap after the
+     * retry window can recover the screen without requiring an app restart.
+     *
+     * A stale successful response is preferable to an empty screen while the
+     * bridge is temporarily unavailable. State-changing APIs intentionally do
+     * not use this method.
+     */
+    private suspend fun loadDiscovery(
+        query: String,
+        ttlMs: Long
+    ): AndroidBridgeResponse? = discoveryRequestMutex.withLock {
+        val now = System.currentTimeMillis()
+        val cached = discoveryCache[query]
+        if (cached != null && DiscoveryRecoveryPolicy.isFresh(cached.cachedAtMs, now, ttlMs)) {
+            return@withLock cached.response
+        }
+
+        val priorFailure = discoveryFailures[query]
+        if (priorFailure != null && !DiscoveryRecoveryPolicy.mayRetry(
+                lastFailureAtMs = priorFailure.occurredAtMs,
+                consecutiveFailures = priorFailure.consecutiveFailures,
+                nowMs = now
+            )
+        ) {
+            Log.d("NestoraRepo", "[Discovery] Serving stale/empty '$query' during recovery backoff")
+            return@withLock cached?.response
+        }
+
+        // Discovery is idempotent. One immediate retry covers a dropped inline
+        // callback while the policy above prevents repeated taps from hammering
+        // an unavailable backend.
+        repeat(2) { attempt ->
+            val response = sendBridgeQuery(query)
+            if (response != null) {
+                discoveryCache[query] = CachedDiscoveryResponse(response, System.currentTimeMillis())
+                discoveryFailures.remove(query)
+                return@withLock response
+            }
+            if (attempt == 0) delay(400)
+        }
+
+        val failedNow = System.currentTimeMillis()
+        val failures = (priorFailure?.consecutiveFailures ?: 0) + 1
+        discoveryFailures[query] = DiscoveryFailure(failedNow, failures)
+        Log.w("NestoraRepo", "[Discovery] '$query' unavailable; next recovery attempt in ${DiscoveryRecoveryPolicy.retryDelayMs(failures)}ms")
+        cached?.response
+    }
+
+    /** Call after this process changes a listing that customers can discover. */
+    private fun invalidateDiscoveryCache() {
+        discoveryCache.clear()
+        discoveryFailures.clear()
+    }
+
     suspend fun chat(query: String, addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         val bridgeQuery = withAddressBarCoordinates(query, addressBarLatitude, addressBarLongitude)
         // Search is read-only, so one retry is safe. This covers a dropped
@@ -666,15 +738,18 @@ class NestoraRepository {
     // =========================================================================
 
     suspend fun getCategories(): List<Category> = withContext(Dispatchers.IO) {
-        sendBridgeQuery("GET_CATEGORIES")?.categories?.map { it.toCategory() } ?: emptyList()
+        loadDiscovery("GET_CATEGORIES", DiscoveryRecoveryPolicy.CATALOG_TTL_MS)
+            ?.categories?.map { it.toCategory() } ?: emptyList()
     }
 
     suspend fun getServiceTypes(categorySlug: String): List<ServiceType> = withContext(Dispatchers.IO) {
-        sendBridgeQuery("GET_SERVICE_TYPES::$categorySlug")?.serviceTypes?.map { it.toServiceType() } ?: emptyList()
+        loadDiscovery("GET_SERVICE_TYPES::$categorySlug", DiscoveryRecoveryPolicy.CATALOG_TTL_MS)
+            ?.serviceTypes?.map { it.toServiceType() } ?: emptyList()
     }
 
     suspend fun getAllServiceTypes(): List<ServiceType> = withContext(Dispatchers.IO) {
-        sendBridgeQuery("GET_ALL_SERVICE_TYPES")?.serviceTypes?.map { it.toServiceType() } ?: emptyList()
+        loadDiscovery("GET_ALL_SERVICE_TYPES", DiscoveryRecoveryPolicy.CATALOG_TTL_MS)
+            ?.serviceTypes?.map { it.toServiceType() } ?: emptyList()
     }
 
     /**
@@ -722,12 +797,23 @@ class NestoraRepository {
     // chat()'s free-text search which needs the LLM to figure out intent.
     // =========================================================================
 
+    suspend fun getFeedListings(addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        val query = withAddressBarCoordinates("GET_FEED_SERVICES", addressBarLatitude, addressBarLongitude)
+        loadDiscovery(query, DiscoveryRecoveryPolicy.FEED_TTL_MS)
+    }
+
     suspend fun searchByCategory(categorySlug: String, addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
-        sendBridgeQuery(withAddressBarCoordinates("SEARCH_CATEGORY::$categorySlug", addressBarLatitude, addressBarLongitude))
+        loadDiscovery(
+            withAddressBarCoordinates("SEARCH_CATEGORY::$categorySlug", addressBarLatitude, addressBarLongitude),
+            DiscoveryRecoveryPolicy.SEARCH_TTL_MS
+        )
     }
 
     suspend fun searchByServiceType(serviceTypeSlug: String, addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
-        sendBridgeQuery(withAddressBarCoordinates("SEARCH_SERVICE_TYPE::$serviceTypeSlug", addressBarLatitude, addressBarLongitude))
+        loadDiscovery(
+            withAddressBarCoordinates("SEARCH_SERVICE_TYPE::$serviceTypeSlug", addressBarLatitude, addressBarLongitude),
+            DiscoveryRecoveryPolicy.SEARCH_TTL_MS
+        )
     }
 
     suspend fun getMyListings(): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
@@ -736,7 +822,9 @@ class NestoraRepository {
 
     suspend fun setListingActive(listingId: String, active: Boolean): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         if (listingId.isBlank()) return@withContext null
-        sendBridgeQuery("SET_LISTING_ACTIVE::$listingId::$active")
+        sendBridgeQuery("SET_LISTING_ACTIVE::$listingId::$active")?.also { response ->
+            if (response.ok) invalidateDiscoveryCache()
+        }
     }
 
     suspend fun updateListing(
@@ -760,7 +848,9 @@ class NestoraRepository {
             addProperty("latitude", lat)
             addProperty("longitude", lon)
         }
-        sendBridgeQuery("UPDATE_LISTING::${payload.toString()}")
+        sendBridgeQuery("UPDATE_LISTING::${payload.toString()}")?.also { response ->
+            if (response.ok) invalidateDiscoveryCache()
+        }
     }
 
     /**
@@ -783,7 +873,9 @@ class NestoraRepository {
             val saved = sendBridgeQuery("EDIT_LISTING_CHUNK::${started.registrationToken}::$index::${chunks.size}::$chunk") ?: return@withContext null
             if (!saved.ok) return@withContext saved
         }
-        sendBridgeQuery("EDIT_LISTING_SUBMIT::${started.registrationToken}")
+        sendBridgeQuery("EDIT_LISTING_SUBMIT::${started.registrationToken}")?.also { response ->
+            if (response.ok) invalidateDiscoveryCache()
+        }
     }
 
     // =========================================================================
@@ -887,7 +979,16 @@ class NestoraRepository {
 
     /** Full booking history for the logged-in user, both as customer and provider. */
     suspend fun getMyBookings(): List<BookingSummary> = withContext(Dispatchers.IO) {
-        sendBridgeQuery("GET_MY_BOOKINGS", isBackground = true)?.bookings ?: emptyList()
+        getMyBookingsForPolling() ?: emptyList()
+    }
+
+    /**
+     * Polling-only variant that distinguishes a valid empty history from a
+     * bridge/network failure. The controller must not advance its sync cursor
+     * after a failed request, otherwise a later booking update can be missed.
+     */
+    internal suspend fun getMyBookingsForPolling(): List<BookingSummary>? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("GET_MY_BOOKINGS", isBackground = true)?.bookings
     }
 
     /**
@@ -896,7 +997,12 @@ class NestoraRepository {
      * for a full refresh — same call as [getMyBookings].
      */
     suspend fun getBookingUpdates(sinceIso: String?): List<BookingSummary> = withContext(Dispatchers.IO) {
-        sendBridgeQuery("GET_BOOKING_UPDATES::${sinceIso ?: ""}", isBackground = true)?.bookings ?: emptyList()
+        getBookingUpdatesForPolling(sinceIso) ?: emptyList()
+    }
+
+    /** Nullable counterpart used only by [BookingPollingController]. */
+    internal suspend fun getBookingUpdatesForPolling(sinceIso: String?): List<BookingSummary>? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("GET_BOOKING_UPDATES::${sinceIso ?: ""}", isBackground = true)?.bookings
     }
 
     /** Full detail for one booking's tracking screen. */

@@ -1,5 +1,6 @@
-﻿package com.estatenestora.app.ui.screens
+package com.estatenestora.app.ui.screens
 
+import com.estatenestora.app.ui.components.ProjectFooter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -129,7 +130,6 @@ fun CategoriesScreen(
                 .fillMaxWidth()
                 .background(Color.White)
                 .verticalScroll(scrollState)
-                .padding(bottom = 32.dp)
         ) {
             if (categories.isEmpty() || (isLoading && allServiceTypes.isEmpty())) {
                 Box(
@@ -141,8 +141,8 @@ fun CategoriesScreen(
                     CircularProgressIndicator(color = Color(0xFF00382B))
                 }
             } else {
-                val filteredList = categories.mapNotNull { category ->
-                    val services = allServiceTypes.filter { it.categorySlug == category.id }
+                val filteredList = categories.filter { it.isActive }.mapNotNull { category ->
+                    val services = allServiceTypes.filter { it.isActive && it.categorySlug == category.id }
                     val matchedServices = services.filter {
                         searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true) || category.name.contains(searchQuery, ignoreCase = true)
                     }
@@ -231,6 +231,7 @@ fun CategoriesScreen(
                     }
                 }
             }
+            ProjectFooter()
         }
     }
 }

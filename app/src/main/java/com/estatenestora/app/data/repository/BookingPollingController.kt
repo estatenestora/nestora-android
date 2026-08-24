@@ -9,8 +9,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+internal fun shouldRunBookingListPolling(foregrounded: Boolean, bookingsScreenVisible: Boolean): Boolean =
+    foregrounded && bookingsScreenVisible
 
 /**
  * Adaptive polling for the booking list (My/Sent/Received tabs) and a single
@@ -61,29 +67,64 @@ class BookingPollingController(
 
     private var listJob: Job? = null
     private var detailJob: Job? = null
+    private var refreshJob: Job? = null
+    private val listSyncMutex = Mutex()
     private var lastSyncIso: String? = null
-    private var wantsListPolling = false
+    private var hasCompletedListSync = false
+    private var bookingsScreenVisible = false
+    private var sessionActive = false
     private var activeDetailId: String? = null
     private var foregrounded = true
 
-    /** Called when the Bookings tab becomes visible/hidden (e.g. LaunchedEffect(selectedTab)). */
-    fun startListPolling() {
-        wantsListPolling = true
-        if (!foregrounded) return
+    init {
+        // FCM is the normal path for a background booking change. When the app
+        // is visible, consume that event with one refresh — never by starting a
+        // permanent polling loop on unrelated screens.
+        scope.launch {
+            NestoraEventBus.bookingUpdates.collect {
+                if (sessionActive && foregrounded) triggerListSync()
+            }
+        }
+    }
+
+    /** Enables/disables booking refreshes for the authenticated app session. */
+    fun setSessionActive(active: Boolean) {
+        sessionActive = active
+        if (!active) {
+            clear()
+        } else if (bookingsScreenVisible && foregrounded) {
+            triggerListSync()
+            startVisibleListPolling()
+        }
+    }
+
+    /** Called whenever the Bookings tab becomes visible or hidden. */
+    fun setBookingsScreenVisible(visible: Boolean) {
+        bookingsScreenVisible = visible
+        if (!visible) {
+            listJob?.cancel()
+            listJob = null
+            return
+        }
+        triggerListSync()
+        startVisibleListPolling()
+    }
+
+    private fun startVisibleListPolling() {
+        if (!sessionActive || !shouldRunBookingListPolling(foregrounded, bookingsScreenVisible)) return
         if (listJob?.isActive == true) return
         listJob = scope.launch {
             var backoffMs = LIST_INTERVAL_MS
             var consecutiveFailures = 0
+            // setBookingsScreenVisible already triggers the immediate load.
+            // Wait before the first background poll to avoid two back-to-back
+            // Telegram queries when the user opens the tab.
+            delay(LIST_INTERVAL_MS)
             while (isActive) {
                 try {
-                    val updates = if (lastSyncIso == null) {
-                        repository.getMyBookings()
-                    } else {
-                        repository.getBookingUpdates(lastSyncIso)
-                    }
+                    syncListOnce()
                     consecutiveFailures = 0
                     backoffMs = LIST_INTERVAL_MS
-                    mergeSummaries(updates, isFullRefresh = (lastSyncIso == null))
                 } catch (e: Throwable) {
                     consecutiveFailures++
                     backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
@@ -94,21 +135,32 @@ class BookingPollingController(
         }
     }
 
-    fun stopListPolling() {
-        wantsListPolling = false
-        listJob?.cancel()
-        listJob = null
-    }
-
+    /** One immediate, coalesced refresh after a user action or FCM event. */
     fun triggerListSync() {
-        scope.launch {
+        if (!sessionActive || !foregrounded || refreshJob?.isActive == true) return
+        refreshJob = scope.launch {
             try {
-                val updates = repository.getMyBookings()
-                mergeSummaries(updates, isFullRefresh = true)
+                syncListOnce(forceFullRefresh = !hasCompletedListSync)
             } catch (e: Throwable) {
                 Log.e(TAG, "Triggered list sync failed", e)
             }
         }
+    }
+
+    /** Serialises full/delta refreshes so polling cannot race a user/FCM sync. */
+    private suspend fun syncListOnce(forceFullRefresh: Boolean = false) = listSyncMutex.withLock {
+        val requestStartedAt = java.time.Instant.now().toString()
+        val isFullRefresh = forceFullRefresh || !hasCompletedListSync
+        val updates = if (isFullRefresh) {
+            repository.getMyBookingsForPolling()
+        } else {
+            repository.getBookingUpdatesForPolling(lastSyncIso)
+        } ?: throw IllegalStateException("Booking sync did not receive a server response")
+        mergeSummaries(updates, isFullRefresh = isFullRefresh)
+        hasCompletedListSync = true
+        // An empty first response must still create a cursor. Otherwise every
+        // 20-second poll remains GET_MY_BOOKINGS forever for new users.
+        if (lastSyncIso == null) lastSyncIso = requestStartedAt
     }
 
     /** Merges a delta (or full refresh) into the current list by id, newest-first by updatedAt. */
@@ -185,7 +237,10 @@ class BookingPollingController(
     fun onAppForeground() {
         if (foregrounded) return
         foregrounded = true
-        if (wantsListPolling) startListPolling()
+        if (bookingsScreenVisible) {
+            triggerListSync()
+            startVisibleListPolling()
+        }
         activeDetailId?.let { openDetail(it) }
     }
 
@@ -193,17 +248,23 @@ class BookingPollingController(
         foregrounded = false
         listJob?.cancel()
         listJob = null
+        refreshJob?.cancel()
+        refreshJob = null
         detailJob?.cancel()
         detailJob = null
     }
 
     /** Stops all polling and wipes cached state — call on logout/guest-mode switch. */
     fun clear() {
-        wantsListPolling = false
+        sessionActive = false
+        bookingsScreenVisible = false
         activeDetailId = null
         lastSyncIso = null
+        hasCompletedListSync = false
         listJob?.cancel()
         listJob = null
+        refreshJob?.cancel()
+        refreshJob = null
         detailJob?.cancel()
         detailJob = null
         _bookings.value = emptyList()

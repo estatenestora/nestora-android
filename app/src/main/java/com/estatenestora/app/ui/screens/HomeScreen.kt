@@ -1,5 +1,6 @@
 package com.estatenestora.app.ui.screens
 
+import com.estatenestora.app.ui.components.ProjectFooter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -76,8 +77,8 @@ fun getRealLifeImageUrl(key: String): String {
         clean.contains("health") || clean.contains("wellness") || clean.contains("medical") -> "https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?w=320&h=320&fit=crop&q=80"
 
         // --- HOUSEKEEPER & MAINTENANCE ---
-        clean == "plumber" -> "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=320&h=320&fit=crop&q=80"
-        clean == "electrician" -> "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=320&h=320&fit=crop&q=80"
+        clean == "plumber" || clean.contains("plumb") -> "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=600&h=800&fit=crop&q=80"
+        clean == "electrician" || clean.contains("electric") -> "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?w=600&h=800&fit=crop&q=80"
         clean == "ac technician" || clean == "ac" -> "https://images.unsplash.com/photo-1621905251918-48416bd8575a?w=320&h=320&fit=crop&q=80"
         clean == "ro repair technician" -> "https://images.unsplash.com/photo-1585837575652-267c041d77d4?w=320&h=320&fit=crop&q=80"
         clean == "carpenter" -> "https://images.unsplash.com/photo-1504148455328-c376907d081c?w=320&h=320&fit=crop&q=80"
@@ -88,15 +89,15 @@ fun getRealLifeImageUrl(key: String): String {
         clean == "water tank cleaner" -> "https://images.unsplash.com/photo-1508962914676-134849a727f0?w=320&h=320&fit=crop&q=80"
 
         // --- CLEANING & HOUSEHOLD ---
-        clean == "house cleaner" -> "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=320&h=320&fit=crop&q=80"
+        clean == "house cleaner" -> "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=600&h=800&fit=crop&q=80"
         clean == "deep cleaning" -> "https://images.unsplash.com/photo-1527515637462-cff94eecc1ac?w=320&h=320&fit=crop&q=80"
         clean == "bathroom cleaning" -> "https://images.unsplash.com/photo-1600585154526-990dced4db0d?w=320&h=320&fit=crop&q=80"
-        clean == "maid service" || clean == "maid" -> "https://images.unsplash.com/photo-1563453392212-326f5e854473?w=320&h=320&fit=crop&q=80"
+        clean == "maid service" || clean == "maid" || clean.contains("maid") -> "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=600&h=800&fit=crop&q=80"
         clean == "cook" -> "https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=320&h=320&fit=crop&q=80"
         clean == "babysitter" -> "https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?w=320&h=320&fit=crop&q=80"
         clean == "elder care" -> "https://images.unsplash.com/photo-1576765608535-5f04d1e3f289?w=320&h=320&fit=crop&q=80"
         clean == "patient care" -> "https://images.unsplash.com/photo-1584515980181-12ecbfa12d8a?w=320&h=320&fit=crop&q=80"
-        clean == "laundry service" -> "https://images.unsplash.com/photo-1545173168-9f1947e8017e?w=320&h=320&fit=crop&q=80"
+        clean == "laundry service" || clean == "laundry" || clean.contains("laundry") -> "https://images.unsplash.com/photo-1517677208171-0bc6725a3e60?w=600&h=800&fit=crop&q=80"
         clean == "ironing service" -> "https://images.unsplash.com/photo-1489274495757-95c7c837b101?w=320&h=320&fit=crop&q=80"
 
         // --- TRANSPORT & LOGISTICS & COMMUTING ---
@@ -136,12 +137,12 @@ fun getRealLifeImageUrl(key: String): String {
         clean == "driver service" -> "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=320&h=320&fit=crop&q=80"
 
         // --- REAL ESTATE ---
-        clean == "property dealer" -> "https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=320&h=320&fit=crop&q=80"
+        clean == "property dealer" -> "https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=600&h=800&fit=crop&q=80"
         clean == "rental agent" -> "https://images.unsplash.com/photo-1560520031-3a4dc4e9de0c?w=320&h=320&fit=crop&q=80"
         clean == "pg provider" -> "https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=320&h=320&fit=crop&q=80"
         clean == "hostel provider" -> "https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=320&h=320&fit=crop&q=80"
-        clean == "flat owner" -> "https://images.unsplash.com/photo-1513694203232-719a280e022f?w=320&h=320&fit=crop&q=80"
-        clean == "broker" -> "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=320&h=320&fit=crop&q=80"
+        clean == "flat owner" || clean.contains("flat owner") || clean.contains("flat") -> "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=600&h=800&fit=crop&q=80"
+        clean == "broker" || clean.contains("broker") -> "https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=600&h=800&fit=crop&q=80"
 
         // --- FOOD & EVENT ---
         clean == "food mess" -> "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=320&h=320&fit=crop&q=80"
@@ -204,9 +205,93 @@ fun getRealLifeImageUrl(key: String): String {
     }
 }
 
+fun getRealLifeImageModel(key: String): Any {
+    val clean = key.lowercase().replace("&", "and").replace("_", " ").trim()
+    return when {
+        clean == "plumber" || clean.contains("plumb") -> com.estatenestora.app.R.drawable.plumber
+        clean == "maid service" || clean == "maid" || clean.contains("maid") -> com.estatenestora.app.R.drawable.maid
+        clean == "electrician" || clean.contains("electric") -> com.estatenestora.app.R.drawable.electrician
+        clean == "broker" || clean.contains("broker") -> com.estatenestora.app.R.drawable.broker
+        clean == "flat owner" || clean.contains("flat owner") || clean.contains("flat") -> com.estatenestora.app.R.drawable.flat_owner
+        clean == "laundry service" || clean == "laundry" || clean.contains("laundry") -> com.estatenestora.app.R.drawable.laundry_service
+        else -> getRealLifeImageUrl(key)
+    }
+}
+
 data class QuickFilter(val id: String, val label: String, val icon: String)
 
-data class PopularServiceItem(val label: String, val query: String)
+data class PopularServiceItem(val label: String, val subtitle: String, val query: String)
+
+// ── POPULAR SERVICE FULL-BLEED PORTRAIT CARD (Large 175dp x 230dp Edge-to-Edge Format) ──
+@Composable
+fun PopularServiceCard(
+    service: PopularServiceItem,
+    imageModel: Any,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier
+            .width(175.dp)
+            .height(230.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // 1. Full-bleed local/remote image filling 100% of card area
+            AsyncImage(
+                model = imageModel,
+                contentDescription = service.label,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // 2. Subtle top gradient scrim for text contrast
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.78f),
+                                Color.Black.copy(alpha = 0.20f),
+                                Color.Black.copy(alpha = 0.45f)
+                            )
+                        )
+                    )
+            )
+
+            // 3. Text directly overlaying top-left (matching media_1787500716781.png / media_1787501843099.png)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.Top
+            ) {
+                Text(
+                    text = service.label,
+                    style = androidx.compose.ui.text.TextStyle(
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp,
+                        lineHeight = 20.sp
+                    )
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = service.subtitle,
+                    style = androidx.compose.ui.text.TextStyle(
+                        color = Color.White.copy(alpha = 0.92f),
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 12.sp,
+                        lineHeight = 15.sp
+                    )
+                )
+            }
+        }
+    }
+}
 
 // Neutral placeholder shown behind card art while the image loads (or if it
 // fails) — keeps the grid visually stable instead of flashing white/blank.
@@ -216,8 +301,8 @@ private val cardPlaceholderColor = Color(0xFFF0F4F2)
 @Composable
 fun HomeScreen(
     categories: List<Category>,
-    listings: List<ServiceListing>,
-    onListingClick: (ServiceListing) -> Unit,
+    listings: List<ServiceListing> = emptyList(),
+    onListingClick: (ServiceListing) -> Unit = {},
     onSearchClick: () -> Unit,
     onSendTelegramMessage: (String) -> Unit = {},
     onSendTelegramSupport: () -> Unit = {},
@@ -237,13 +322,17 @@ fun HomeScreen(
     tabsList: List<com.estatenestora.app.ui.theme.NestoraTab> = emptyList(),
     selectedTabId: String = "explore",
     onTabSelected: (String) -> Unit = {},
-    currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday()
+    currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday(),
+    isLoadingFeed: Boolean = false,
+    onRefreshFeed: () -> Unit = {},
+    recentlyViewedServices: List<com.estatenestora.app.data.model.ServiceType> = emptyList(),
+    allServiceTypes: List<com.estatenestora.app.data.model.ServiceType> = emptyList(),
+    onServiceTypeClick: (com.estatenestora.app.data.model.ServiceType) -> Unit = {}
 ) {
+    val pageSurface = remember(currentTheme) { selectedMenuSurface(currentTheme) }
     var isSearchFocused by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("all") }
     var aiInputText by remember { mutableStateOf("") }
-    var isVegOnly by remember { mutableStateOf(false) }
     val activeSearchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -276,46 +365,12 @@ fun HomeScreen(
         onScrollChanged(isScrolled)
     }
 
-    val filters = remember {
-        listOf(
-            QuickFilter("all", "All Services", ""),
-            QuickFilter("flat", "Flats", ""),
-            QuickFilter("plumber", "Plumbers", ""),
-            QuickFilter("maid", "Cleaning", ""),
-            QuickFilter("budget", "Under ₹2000", "")
-        )
-    }
-
-    val filteredListings = remember(searchQuery, selectedFilter, listings) {
-        var result = if (searchQuery.isBlank()) listings
-        else {
-            val q = searchQuery.lowercase().trim()
-            listings.filter {
-                it.title.lowercase().contains(q) ||
-                it.serviceType.lowercase().contains(q) ||
-                it.categoryName.lowercase().contains(q) ||
-                it.location.lowercase().contains(q) ||
-                it.providerName.lowercase().contains(q)
-            }
-        }
-        if (selectedFilter != "all") {
-            result = when (selectedFilter) {
-                "flat" -> result.filter { it.serviceType.contains("Flat", ignoreCase = true) || it.title.contains("Flat", ignoreCase = true) }
-                "plumber" -> result.filter { it.serviceType.contains("Plumb", ignoreCase = true) || it.title.contains("Plumb", ignoreCase = true) }
-                "maid" -> result.filter { it.serviceType.contains("Clean", ignoreCase = true) || it.title.contains("Clean", ignoreCase = true) }
-                "budget" -> result.filter { it.price <= 2000 }
-                else -> result
-            }
-        }
-        result
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFEDF2EE)),
+                .background(Color.White),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             // ── TOP HEADER (Dark Teal-Green Gradient matching Swiggy Layout) ────
@@ -349,144 +404,163 @@ fun HomeScreen(
 
         // ── SWIGGY-STYLE INTEGRATED HERO CAROUSEL ────────────────────────────
         item {
-            HeroCarousel(theme = "explore")
+            HeroCarousel(theme = "explore", canvasColor = pageSurface)
         }
 
-        // ── SERVICES ──────────────────────────────────────────────────
+        // ── POPULAR SERVICES CAROUSEL ─────────────────────────────────────────
         item {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.White)
-                    .padding(top = 16.dp, bottom = 20.dp)
+                    .clip(RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp))
+                    .background(pageSurface)
+                    .padding(vertical = 12.dp)
             ) {
-                Text(
-                    text = "Popular Services",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0D1A13),
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-                Spacer(Modifier.height(14.dp))
-
                 val services = remember {
                     listOf(
-                        PopularServiceItem("Flats", "flat"),
-                        PopularServiceItem("Plumbers", "plumber"),
-                        PopularServiceItem("Maids", "maid"),
-                        PopularServiceItem("Cooks", "cook"),
-                        PopularServiceItem("Electricians", "electrician"),
-                        PopularServiceItem("AC Repair", "ac"),
-                        PopularServiceItem("Tutors", "tutor"),
-                        PopularServiceItem("Carpenters", "carpenter"),
-                        PopularServiceItem("Painters", "painter"),
-                        PopularServiceItem("Deep Clean", "deep cleaning"),
-                        PopularServiceItem("Packers Movers", "packers movers"),
-                        PopularServiceItem("Nurses", "nurse")
+                        PopularServiceItem("Plumbers", "Expert Fixes", "plumber"),
+                        PopularServiceItem("Maids", "Daily House Help", "maid"),
+                        PopularServiceItem("Electricians", "Wiring & Repair", "electrician"),
+                        PopularServiceItem("Brokers", "Verified Agents", "broker"),
+                        PopularServiceItem("Flat Owners", "Direct Rentals", "flat owner"),
+                        PopularServiceItem("Laundry Service", "Wash & Fold", "laundry service")
                     )
                 }
 
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     items(services) { svc ->
-                        SwiggyStyleCard(
-                            label = svc.label,
-                            imageUrl = getRealLifeImageUrl(svc.query),
-                            onClick = { searchQuery = svc.query }
+                        PopularServiceCard(
+                            service = svc,
+                            imageModel = getRealLifeImageModel(svc.query),
+                            onClick = {
+                                onServiceTypeClick(
+                                    com.estatenestora.app.data.model.ServiceType(
+                                        slug = svc.query,
+                                        name = svc.label,
+                                        emoji = "",
+                                        description = "",
+                                        categorySlug = ""
+                                    )
+                                )
+                            }
                         )
                     }
                 }
             }
         }
 
-        // ── CATEGORY SECTION ──────────────────────────────────────────────
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White)
-                    .padding(top = 4.dp, bottom = 20.dp)
-            ) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                    thickness = 0.8.dp,
-                    color = Color(0xFFEEEEEE)
-                )
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    text = "Categories",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0D1A13),
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-                Spacer(Modifier.height(14.dp))
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    items(categories) { cat ->
-                        SwiggyStyleCard(
-                            label = cat.name,
-                            imageUrl = getRealLifeImageUrl(cat.id),
-                            onClick = { onCategorySelected(cat) }
-                         )
-                    }
-                }
-            }
-        }
-
-        // ── AVAILABLE SERVICES & PROVIDERS NEAR YOU (HIRE MODE) ─────────────────
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White)
-                    .padding(top = 8.dp, bottom = 8.dp)
-            ) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                    thickness = 0.8.dp,
-                    color = Color(0xFFEEEEEE)
-                )
-                Spacer(Modifier.height(16.dp))
-                Row(
+        // ── YOU RECENTLY VIEWED STRIP ───────────────────────────────────────
+        val activeRecentlyViewed = recentlyViewedServices.filter { it.isActive }
+        if (activeRecentlyViewed.isNotEmpty()) {
+            item {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .background(Color.White)
+                        .padding(vertical = 14.dp)
                 ) {
-                    Column {
-                        Text(
-                            text = "Featured Service Providers",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0D1A13)
-                        )
-                        Text(
-                            text = "Verified professionals ready to hire near you",
-                            fontSize = 11.sp,
-                            color = NestoraTextMuted
-                        )
+                    Text(
+                        text = "You recently viewed",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0D1A13),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(activeRecentlyViewed) { svc ->
+                            SwiggyStyleCard(
+                                label = svc.name,
+                                imageUrl = svc.slug.ifBlank { svc.name },
+                                onClick = { onServiceTypeClick(svc) }
+                            )
+                        }
                     }
+                }
+            }
+        }
+
+        // ── PER-CATEGORY SECTIONS (SS1 PATTERN) ──────────────────────────────
+        categories.filter { it.isActive }.forEach { cat ->
+            val catServices = allServiceTypes.filter { it.isActive && it.categorySlug == cat.id }
+                .ifEmpty { getFallbackServicesForCategory(cat.id, cat.name) }
+
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White)
+                        .padding(vertical = 14.dp)
+                ) {
+                    Text(
+                        text = cat.name,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0D1A13),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(catServices) { svc ->
+                            SwiggyStyleCard(
+                                label = svc.name,
+                                imageUrl = svc.slug.ifBlank { svc.name },
+                                onClick = { onServiceTypeClick(svc) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Restored from main: active provider cards remain directly bookable
+        // from Explore, while the newer category-first layout stays intact.
+        if (listings.isNotEmpty() || isLoadingFeed) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White)
+                        .padding(top = 14.dp, bottom = 6.dp)
+                ) {
+                    Text(
+                        text = "Featured service providers",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0D1A13),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    Text(
+                        text = "Available near your selected location",
+                        fontSize = 11.sp,
+                        color = NestoraTextMuted,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                    )
                     if (isLoadingFeed) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
                             color = NestoraMint
                         )
                     }
                 }
-                Spacer(Modifier.height(14.dp))
             }
-        }
-
-        if (filteredListings.isNotEmpty()) {
-            items(filteredListings) { listing ->
-                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+            items(listings.take(12), key = ServiceListing::id) { listing ->
+                Box(modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White)
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
                     MarketplaceListingCard(
                         listing = listing,
                         onClick = { onListingClick(listing) },
@@ -525,20 +599,35 @@ fun HomeScreen(
                             textAlign = TextAlign.Center
                         )
                         Spacer(Modifier.height(12.dp))
-                        Button(
-                            onClick = onSearchClick,
-                            colors = ButtonDefaults.buttonColors(containerColor = NestoraMint),
-                            shape = RoundedCornerShape(10.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Chat with Nestora AI", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                            Button(
+                                onClick = onSearchClick,
+                                colors = ButtonDefaults.buttonColors(containerColor = NestoraMint),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Chat with Nestora AI", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = onRefreshFeed,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                border = BorderStroke(1.dp, NestoraMint),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Refresh Feed", color = NestoraMint, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            }
                         }
                     }
                 }
             }
         }
 
-        item { Spacer(Modifier.height(32.dp)) }
+        item { Spacer(Modifier.height(48.dp)) }
+        item { ProjectFooter() }
     }
+
 
     // ── Active Search Overlay ──
     if (isSearchFocused) {
@@ -746,6 +835,9 @@ fun SwiggyStyleCard(
     onClick: () -> Unit,
     imageSize: androidx.compose.ui.unit.Dp = 80.dp
 ) {
+    val model = remember(imageUrl, label) {
+        getRealLifeImageModel(if (imageUrl.isNotBlank()) imageUrl else label)
+    }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -760,7 +852,7 @@ fun SwiggyStyleCard(
                 .border(1.dp, Color(0xFFEEEEEE), RoundedCornerShape(12.dp))
         ) {
             AsyncImage(
-                model = imageUrl,
+                model = model,
                 contentDescription = label,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -945,5 +1037,72 @@ fun HighlightFeatureCard(
                 }
             }
         }
+    }
+}
+
+// Fallback services per category (ss1 pattern) when server category service types aren't loaded yet
+fun getFallbackServicesForCategory(categoryId: String, categoryName: String): List<com.estatenestora.app.data.model.ServiceType> {
+    val cleanId = categoryId.lowercase().replace("&", "and").replace("_", " ").trim()
+    val cleanName = categoryName.lowercase()
+
+    fun createType(slug: String, name: String) = com.estatenestora.app.data.model.ServiceType(
+        slug = slug,
+        name = name,
+        emoji = "",
+        description = "",
+        categorySlug = categoryId
+    )
+
+    return when {
+        cleanId.contains("housekeeper") || cleanName.contains("housekeeper") || cleanName.contains("maintenance") -> listOf(
+            createType("plumber", "Plumber"),
+            createType("electrician", "Electrician"),
+            createType("ac_technician", "AC Technician"),
+            createType("ro_repair_technician", "RO Repair Technician"),
+            createType("carpenter", "Carpenter"),
+            createType("painter", "Painter"),
+            createType("tv_repair", "TV Repair"),
+            createType("fridge_repair", "Fridge Repair")
+        )
+        cleanId.contains("cleaning") || cleanName.contains("cleaning") || cleanName.contains("household") -> listOf(
+            createType("house_cleaner", "House Cleaner"),
+            createType("deep_cleaning", "Deep Cleaning"),
+            createType("bathroom_cleaning", "Bathroom Cleaning"),
+            createType("maid_service", "Maid Service"),
+            createType("cook", "Cook"),
+            createType("babysitter", "Babysitter"),
+            createType("laundry_service", "Laundry Service")
+        )
+        cleanId.contains("transport") || cleanName.contains("transport") || cleanName.contains("logistics") -> listOf(
+            createType("packers_movers", "Packers & Movers"),
+            createType("delivery_service", "Delivery Service"),
+            createType("truck_rental", "Truck Rental"),
+            createType("bike_transport", "Bike Transport"),
+            createType("auto_driver", "Auto Driver")
+        )
+        cleanId.contains("commuting") || cleanName.contains("commuting") || cleanName.contains("cab") -> listOf(
+            createType("cab", "Cab"),
+            createType("bike", "Bike"),
+            createType("driver_service", "Driver Service")
+        )
+        cleanId.contains("digital") || cleanName.contains("digital") || cleanName.contains("technical") -> listOf(
+            createType("laptop_repair", "Laptop Repair"),
+            createType("mobile_repair", "Mobile Repair"),
+            createType("wifi_installation", "Wifi Installation"),
+            createType("graphic_designer", "Graphic Designer"),
+            createType("photographer", "Photographer")
+        )
+        cleanId.contains("real_estate") || cleanName.contains("real estate") || cleanName.contains("property") -> listOf(
+            createType("flat", "Flat / Apartment"),
+            createType("pg_provider", "PG Provider"),
+            createType("property_dealer", "Property Dealer"),
+            createType("rental_agent", "Rental Agent")
+        )
+        else -> listOf(
+            createType("tutor", "Tutor"),
+            createType("beautician", "Beautician"),
+            createType("fitness_trainer", "Fitness Trainer"),
+            createType("physiotherapist", "Physiotherapist")
+        )
     }
 }
