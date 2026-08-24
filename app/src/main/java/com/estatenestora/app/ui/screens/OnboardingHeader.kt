@@ -254,24 +254,24 @@ fun OnboardingTopBar(
                         .clickable { onSelectLocationClick() }
                         .padding(vertical = 4.dp)
                 ) {
-                    // Nestora Logo circular badge matching original design
+                    // Nestora Logo symbol with metallic border and glow
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(38.dp)
                             .border(
-                                width = 1.5.dp,
-                                color = Color(0xFFFFB800),
+                                width = 1.dp,
+                                brush = Brush.sweepGradient(
+                                    colors = listOf(Color(0xFFFFD700), Color(0xFFFFA500), Color(0xFFFFD700))
+                                ),
                                 shape = CircleShape
                             )
                             .background(Color.White, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Image(
-                            painter = painterResource(id = R.drawable.nestora_logo),
-                            contentDescription = "Nestora Logo",
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
+                            painter = painterResource(id = R.drawable.nestora_logo_symbol),
+                            contentDescription = "Nestora Premium Logo",
+                            modifier = Modifier.size(32.dp).clip(CircleShape)
                         )
                     }
                     

@@ -807,7 +807,7 @@ fun ProviderListingsScreen(
 
     if (selectedListingForDetail != null) {
         val detailListing = selectedListingForDetail!!
-        // ── 8. Full Details & Edit Page Overlay ──
+        // â”€â”€ 8. Full Details & Edit Page Overlay â”€â”€
         var dTitle by remember(detailListing.id) { mutableStateOf(detailListing.title) }
         var dDesc by remember(detailListing.id) { mutableStateOf(detailListing.description) }
         var dPrice by remember(detailListing.id) { mutableStateOf(if (detailListing.price > 0) detailListing.price.toInt().toString() else "") }
@@ -867,7 +867,7 @@ fun ProviderListingsScreen(
 
             OutlinedTextField(
                 value = dPrice, onValueChange = { dPrice = it.filter { c -> c.isDigit() } },
-                label = { Text("Base Price (₹)") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text("Base Price (â‚¹)") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
             Spacer(Modifier.height(10.dp))
@@ -915,8 +915,8 @@ fun ProviderListingsScreen(
             Spacer(Modifier.height(6.dp))
             Text(
                 when (availabilityPreset) {
-                    "ASAP_ONLY" -> "🚀 You'll accept jobs immediately — customers can book you right now."
-                    else -> "🕒 You work on a schedule — customers book specific days & hours."
+                    "ASAP_ONLY" -> "ðŸš€ You'll accept jobs immediately â€” customers can book you right now."
+                    else -> "ðŸ• You work on a schedule â€” customers book specific days & hours."
                 }, fontSize = 11.sp, color = Color(0xFF607D72)
             )
 
@@ -981,7 +981,7 @@ fun ProviderListingsScreen(
                                 val readableDays = customDays.sorted().joinToString(", ") { dayNames[it] }
                                 android.widget.Toast.makeText(
                                     context,
-                                    "✅ Availability saved for $readableDays ($customStart – $customEnd)",
+                                    "âœ… Availability saved for $readableDays ($customStart â€“ $customEnd)",
                                     android.widget.Toast.LENGTH_LONG
                                 ).show()
                             } else {
@@ -1017,7 +1017,7 @@ fun ProviderListingsScreen(
                         val resp = onUpdateListing?.invoke(detailListing.id, dTitle, dDesc, priceVal, dLocation, cityGuess, dLat, dLon)
                         savingEdit = false
                         if (resp?.ok == true) {
-                            android.widget.Toast.makeText(context, "✅ Listing updated successfully!", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(context, "âœ… Listing updated successfully!", android.widget.Toast.LENGTH_SHORT).show()
                             val updated = detailListing.copy(title = dTitle, description = dDesc, price = priceVal, location = dLocation)
                             listings = listings.map { if (it.id == updated.id) updated else it }
                             selectedListingForDetail = null
@@ -1038,7 +1038,7 @@ fun ProviderListingsScreen(
     } else {
         Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
 
-            // ── 1. Sticky Header Top Bar with statusBarsPadding() ──
+            // â”€â”€ 1. Sticky Header Top Bar with statusBarsPadding() â”€â”€
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = Color.White,
@@ -1156,12 +1156,12 @@ fun ProviderListingsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text("Filter ⇅", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (hasActiveFilter) Color.White else Color(0xFF333333))
+                                Text("Filter â‡…", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (hasActiveFilter) Color.White else Color(0xFF333333))
                             }
                         }
 
                         // Sort by Chip
-                        val sortText = if (filterSort == "Relevance") "Sort by ▾" else "$filterSort ▾"
+                        val sortText = if (filterSort == "Relevance") "Sort by â–¾" else "$filterSort â–¾"
                         Surface(
                             modifier = Modifier.clickable {
                                 pendingSort = filterSort; pendingStatus = filterStatus
@@ -1186,7 +1186,7 @@ fun ProviderListingsScreen(
                                 border = BorderStroke(1.dp, if (selectedCategoryFilter != "All") NestoraMint else Color(0xFFDDE2E9))
                             ) {
                                 Text(
-                                    text = if (selectedCategoryFilter == "All") "Category ▾" else "$selectedCategoryFilter ▾",
+                                    text = if (selectedCategoryFilter == "All") "Category â–¾" else "$selectedCategoryFilter â–¾",
                                     fontSize = 12.sp,
                                     color = if (selectedCategoryFilter != "All") NestoraMint else Color(0xFF444444),
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -1220,7 +1220,7 @@ fun ProviderListingsScreen(
                                 border = BorderStroke(1.dp, if (selectedServiceTypeFilter != "All") NestoraMint else Color(0xFFDDE2E9))
                             ) {
                                 Text(
-                                    text = if (selectedServiceTypeFilter == "All") "Service Type ▾" else "${selectedServiceTypeFilter.replace("_", " ").replaceFirstChar { it.uppercase() }} ▾",
+                                    text = if (selectedServiceTypeFilter == "All") "Service Type â–¾" else "${selectedServiceTypeFilter.replace("_", " ").replaceFirstChar { it.uppercase() }} â–¾",
                                     fontSize = 12.sp,
                                     color = if (selectedServiceTypeFilter != "All") NestoraMint else Color(0xFF444444),
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -1287,7 +1287,7 @@ fun ProviderListingsScreen(
                             border = BorderStroke(1.dp, if (ratingSelected) NestoraMint else Color(0xFFDDE2E9))
                         ) {
                             Text(
-                                text = if (ratingSelected) "⭐ ${filterMinRating.toInt()}+" else "Ratings ▾",
+                                text = if (ratingSelected) "â­ ${filterMinRating.toInt()}+" else "Ratings â–¾",
                                 fontSize = 12.sp,
                                 color = if (ratingSelected) NestoraMint else Color(0xFF444444),
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -1304,7 +1304,7 @@ fun ProviderListingsScreen(
             } else if (errorMessage != null) {
                 Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("⚠️", fontSize = 36.sp)
+                        Text("âš ï¸", fontSize = 36.sp)
                         Spacer(Modifier.height(8.dp))
                         Text(errorMessage!!, color = Color.Red, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(16.dp))
@@ -1315,7 +1315,7 @@ fun ProviderListingsScreen(
                     }
                 }
             } else {
-                // ── LazyColumn Container for Discovery Cards ──
+                // â”€â”€ LazyColumn Container for Discovery Cards â”€â”€
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -1340,7 +1340,7 @@ fun ProviderListingsScreen(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 64.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("🔍", fontSize = 48.sp)
+                                Text("ðŸ”", fontSize = 48.sp)
                                 Spacer(Modifier.height(12.dp))
                                 Text("No listings found", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F2E23))
                                 Spacer(Modifier.height(4.dp))
@@ -1353,7 +1353,7 @@ fun ProviderListingsScreen(
         }
     }
 
-    // ── Filter Modal BottomSheet ──
+    // â”€â”€ Filter Modal BottomSheet â”€â”€
     if (showFilterSheet) {
         ModalBottomSheet(
             onDismissRequest = { showFilterSheet = false },
@@ -1367,7 +1367,7 @@ fun ProviderListingsScreen(
                 ) {
                     Text("Filter", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1C1C1C))
                     IconButton(onClick = { showFilterSheet = false }) {
-                        Text("✕", fontSize = 18.sp, color = Color.Gray)
+                        Text("âœ•", fontSize = 18.sp, color = Color.Gray)
                     }
                 }
                 HorizontalDivider()
@@ -1447,12 +1447,12 @@ fun ProviderListingsScreen(
                                             onClick = { pendingMinRating = rating },
                                             colors = RadioButtonDefaults.colors(selectedColor = NestoraMint)
                                         )
-                                        Text(if (rating == 0f) "Any rating" else "⭐ ${rating}+", fontSize = 13.sp, color = Color(0xFF333333))
+                                        Text(if (rating == 0f) "Any rating" else "â­ ${rating}+", fontSize = 13.sp, color = Color(0xFF333333))
                                     }
                                 }
                             }
                             "Price Range" -> {
-                                Text("PRICE RANGE (₹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                                Text("PRICE RANGE (â‚¹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
                                 Spacer(Modifier.height(12.dp))
                                 OutlinedTextField(
                                     value = pendingMinPrice,
@@ -1580,7 +1580,7 @@ fun ProviderListingCard(
     val pagerState = rememberPagerState(pageCount = { 3 })
     val imageList = remember(listing.serviceType) { getServiceTypeImages(listing.serviceType) }
 
-    // ── Zomato Structural Layout Card ──
+    // â”€â”€ Zomato Structural Layout Card â”€â”€
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -1591,7 +1591,7 @@ fun ProviderListingCard(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
 
-            // ── 3. Image Slider Section (Top half of the card) ──
+            // â”€â”€ 3. Image Slider Section (Top half of the card) â”€â”€
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1651,7 +1651,7 @@ fun ProviderListingCard(
                 }
             }
 
-            // ── 4. Restaurant Information Metadata (Middle section) ──
+            // â”€â”€ 4. Restaurant Information Metadata (Middle section) â”€â”€
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1703,7 +1703,7 @@ fun ProviderListingCard(
 
                 // Address & 7. Cover Range Row (service_radius_km)
                 Text(
-                    text = "${listing.location.ifBlank { "City Centre 2, Rajarhat" }} • Cover range: ${listing.serviceRadiusKm} km",
+                    text = "${listing.location.ifBlank { "City Centre 2, Rajarhat" }} â€¢ Cover range: ${listing.serviceRadiusKm} km",
                     fontSize = 13.sp,
                     color = Color(0xFF757575),
                     maxLines = 1,
@@ -1714,14 +1714,14 @@ fun ProviderListingCard(
 
                 // Cuisine / Service Row (without 'for two')
                 Text(
-                    text = "$categoryDisplayName, $serviceTypeDisplayName • ₹${listing.price.toInt()}",
+                    text = "$categoryDisplayName, $serviceTypeDisplayName â€¢ â‚¹${listing.price.toInt()}",
                     fontSize = 13.sp,
                     color = Color(0xFF757575),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // ── 9. Show description instead of offer and payment ──
+                // â”€â”€ 9. Show description instead of offer and payment â”€â”€
                 if (listing.description.isNotBlank()) {
                     Spacer(Modifier.height(10.dp))
                     HorizontalDivider(color = Color(0xFFF2F2F2))
@@ -1739,7 +1739,7 @@ fun ProviderListingCard(
                 HorizontalDivider(color = Color(0xFFF2F2F2))
                 Spacer(Modifier.height(8.dp))
 
-                // ── 1. & 2. Toggle active & real count of created bookings on bottom left ──
+                // â”€â”€ 1. & 2. Toggle active & real count of created bookings on bottom left â”€â”€
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1756,7 +1756,7 @@ fun ProviderListingCard(
                                 if (resp?.ok == true) {
                                     isActive = active
                                     android.widget.Toast.makeText(context,
-                                        if (active) "✅ Listing activated" else "⏸ Listing deactivated",
+                                        if (active) "âœ… Listing activated" else "â¸ Listing deactivated",
                                         android.widget.Toast.LENGTH_SHORT).show()
                                 } else {
                                     android.widget.Toast.makeText(context,

@@ -722,19 +722,6 @@ class NestoraRepository {
     // chat()'s free-text search which needs the LLM to figure out intent.
     // =========================================================================
 
-    suspend fun getFeedListings(addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
-        val query = withAddressBarCoordinates("GET_FEED_SERVICES", addressBarLatitude, addressBarLongitude)
-        // Read-only feed query with single retry
-        repeat(2) { attempt ->
-            val response = sendBridgeQuery(query)
-            if (response != null) return@withContext response
-            if (attempt == 0) {
-                delay(350)
-            }
-        }
-        null
-    }
-
     suspend fun searchByCategory(categorySlug: String, addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         sendBridgeQuery(withAddressBarCoordinates("SEARCH_CATEGORY::$categorySlug", addressBarLatitude, addressBarLongitude))
     }

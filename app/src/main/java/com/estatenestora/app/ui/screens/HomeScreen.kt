@@ -237,9 +237,7 @@ fun HomeScreen(
     tabsList: List<com.estatenestora.app.ui.theme.NestoraTab> = emptyList(),
     selectedTabId: String = "explore",
     onTabSelected: (String) -> Unit = {},
-    currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday(),
-    isLoadingFeed: Boolean = false,
-    onRefreshFeed: () -> Unit = {}
+    currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday()
 ) {
     var isSearchFocused by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
