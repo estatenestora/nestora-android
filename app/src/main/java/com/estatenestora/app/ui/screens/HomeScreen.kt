@@ -324,6 +324,7 @@ fun HomeScreen(
     onTabSelected: (String) -> Unit = {},
     currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday(),
     isLoadingFeed: Boolean = false,
+    onRefreshFeed: () -> Unit = {},
     recentlyViewedServices: List<com.estatenestora.app.data.model.ServiceType> = emptyList(),
     allServiceTypes: List<com.estatenestora.app.data.model.ServiceType> = emptyList(),
     onServiceTypeClick: (com.estatenestora.app.data.model.ServiceType) -> Unit = {}
@@ -567,8 +568,6 @@ fun HomeScreen(
                     )
                 }
             }
-<<<<<<< Updated upstream
-=======
         } else if (!isLoadingFeed) {
             item {
                 Surface(
@@ -623,7 +622,6 @@ fun HomeScreen(
                     }
                 }
             }
->>>>>>> Stashed changes
         }
 
         item { Spacer(Modifier.height(48.dp)) }
