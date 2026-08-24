@@ -20,6 +20,9 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.text.input.KeyboardType
 import kotlinx.coroutines.launch
@@ -109,6 +112,7 @@ fun RegisterChoiceScreen(
     onTabSelected: (String) -> Unit = {},
     currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday()
 ) {
+    val pageSurface = remember(currentTheme) { selectedMenuSurface(currentTheme) }
 
     var isBottomBarVisible by remember { mutableStateOf(true) }
     val nestedScrollConnection = remember {
@@ -355,35 +359,17 @@ fun RegisterChoiceScreen(
                         }
 
                         item {
-                            HeroCarousel(theme = "register")
+                            HeroCarousel(theme = "register", canvasColor = pageSurface)
                         }
 
                         item {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color.White)
-                                    .padding(vertical = 24.dp)
+                                    .clip(RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp))
+                                    .background(pageSurface)
+                                    .padding(top = 16.dp, bottom = 24.dp)
                             ) {
-                                Text(
-                                    text = "Register & List Services",
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = NestoraMint,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = "Manage your provider setup and list services on Nestora",
-                                    fontSize = 12.sp,
-                                    color = Color.Gray,
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                )
-                                
-                                Spacer(Modifier.height(24.dp))
-                                
                                 // 2. Firebase-style 2-Column Dashboard Layout (Row: Left Large Action + Right Stacked column)
                                 Row(
                                     modifier = Modifier
@@ -807,7 +793,7 @@ fun ProviderListingsScreen(
 
     if (selectedListingForDetail != null) {
         val detailListing = selectedListingForDetail!!
-        // â”€â”€ 8. Full Details & Edit Page Overlay â”€â”€
+        // -- 8. Full Details & Edit Page Overlay --
         var dTitle by remember(detailListing.id) { mutableStateOf(detailListing.title) }
         var dDesc by remember(detailListing.id) { mutableStateOf(detailListing.description) }
         var dPrice by remember(detailListing.id) { mutableStateOf(if (detailListing.price > 0) detailListing.price.toInt().toString() else "") }
@@ -867,7 +853,7 @@ fun ProviderListingsScreen(
 
             OutlinedTextField(
                 value = dPrice, onValueChange = { dPrice = it.filter { c -> c.isDigit() } },
-                label = { Text("Base Price (â‚¹)") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text("Base Price (Rs.)") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
             Spacer(Modifier.height(10.dp))
@@ -915,8 +901,8 @@ fun ProviderListingsScreen(
             Spacer(Modifier.height(6.dp))
             Text(
                 when (availabilityPreset) {
-                    "ASAP_ONLY" -> "ðŸš€ You'll accept jobs immediately â€” customers can book you right now."
-                    else -> "ðŸ• You work on a schedule â€” customers book specific days & hours."
+                    "ASAP_ONLY" -> "You will accept jobs immediately - customers can book you right now."
+                    else -> "You work on a schedule - customers book specific days & hours."
                 }, fontSize = 11.sp, color = Color(0xFF607D72)
             )
 
@@ -981,7 +967,7 @@ fun ProviderListingsScreen(
                                 val readableDays = customDays.sorted().joinToString(", ") { dayNames[it] }
                                 android.widget.Toast.makeText(
                                     context,
-                                    "âœ… Availability saved for $readableDays ($customStart â€“ $customEnd)",
+                                    "Availability saved for $readableDays ($customStart - $customEnd)",
                                     android.widget.Toast.LENGTH_LONG
                                 ).show()
                             } else {
@@ -1017,7 +1003,7 @@ fun ProviderListingsScreen(
                         val resp = onUpdateListing?.invoke(detailListing.id, dTitle, dDesc, priceVal, dLocation, cityGuess, dLat, dLon)
                         savingEdit = false
                         if (resp?.ok == true) {
-                            android.widget.Toast.makeText(context, "âœ… Listing updated successfully!", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(context, "Listing updated successfully!", android.widget.Toast.LENGTH_SHORT).show()
                             val updated = detailListing.copy(title = dTitle, description = dDesc, price = priceVal, location = dLocation)
                             listings = listings.map { if (it.id == updated.id) updated else it }
                             selectedListingForDetail = null
@@ -1038,7 +1024,7 @@ fun ProviderListingsScreen(
     } else {
         Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
 
-            // â”€â”€ 1. Sticky Header Top Bar with statusBarsPadding() â”€â”€
+            // -- 1. Sticky Header Top Bar with statusBarsPadding() --
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = Color.White,
@@ -1072,13 +1058,13 @@ fun ProviderListingsScreen(
 
                         // Search Text Input Box
                         Surface(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).height(44.dp),
                             shape = RoundedCornerShape(12.dp),
                             color = Color(0xFFF1F3F5),
                             border = BorderStroke(1.dp, Color(0xFFE2EAF2))
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 0.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -1095,10 +1081,18 @@ fun ProviderListingsScreen(
                                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = Color(0xFF1C1C1C)),
                                     modifier = Modifier.weight(1f),
                                     decorationBox = { inner ->
-                                        if (searchKey.isEmpty()) {
-                                            Text("Search for restaurant, area, vib...", fontSize = 14.sp, color = Color(0xFF9E9E9E))
+                                        Box(contentAlignment = Alignment.CenterStart) {
+                                            if (searchKey.isEmpty()) {
+                                                Text(
+                                                    text = "Search for restaurant, area, vib...",
+                                                    fontSize = 14.sp,
+                                                    color = Color(0xFF9E9E9E),
+                                                    maxLines = 1,
+                                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            inner()
                                         }
-                                        inner()
                                     }
                                 )
                             }
@@ -1127,7 +1121,7 @@ fun ProviderListingsScreen(
 
                     Spacer(Modifier.height(8.dp))
 
-                    // Horizontal Filter Track (Scrollable chips)
+                    // Horizontal Filter Track (Scrollable chips matching ss1)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1136,7 +1130,7 @@ fun ProviderListingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Filter Button Chip
+                        // 1. Filter Button Chip
                         Surface(
                             modifier = Modifier.clickable {
                                 pendingSort = filterSort
@@ -1156,28 +1150,51 @@ fun ProviderListingsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text("Filter â‡…", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (hasActiveFilter) Color.White else Color(0xFF333333))
+                                Text(
+                                    text = "Filter",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (hasActiveFilter) Color.White else Color(0xFF333333)
+                                )
                             }
                         }
 
-                        // Sort by Chip
-                        val sortText = if (filterSort == "Relevance") "Sort by â–¾" else "$filterSort â–¾"
+                        // 2. Sort by Chip
+                        val sortText = if (filterSort == "Relevance") "Sort by" else filterSort
                         Surface(
                             modifier = Modifier.clickable {
-                                pendingSort = filterSort; pendingStatus = filterStatus
-                                pendingMinPrice = filterMinPrice; pendingMaxPrice = filterMaxPrice
-                                pendingMinRating = filterMinRating; pendingCategory = "Sort"
+                                pendingSort = filterSort
+                                pendingStatus = filterStatus
+                                pendingMinPrice = filterMinPrice
+                                pendingMaxPrice = filterMaxPrice
+                                pendingMinRating = filterMinRating
+                                pendingCategory = "Sort"
                                 showFilterSheet = true
                             },
                             shape = RoundedCornerShape(10.dp),
                             color = if (filterSort != "Relevance") Color(0xFFE8F5E9) else Color.White,
                             border = BorderStroke(1.dp, if (filterSort != "Relevance") NestoraMint else Color(0xFFDDE2E9))
                         ) {
-                            Text(sortText, fontSize = 12.sp, color = if (filterSort != "Relevance") NestoraMint else Color(0xFF444444),
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = sortText,
+                                    fontSize = 12.sp,
+                                    color = if (filterSort != "Relevance") NestoraMint else Color(0xFF444444)
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = if (filterSort != "Relevance") NestoraMint else Color(0xFF444444),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
 
-                        // Category Dropdown Filter Chip
+                        // 3. Category Dropdown Filter Chip
                         Box {
                             Surface(
                                 modifier = Modifier.clickable { categoryMenuExpanded = true },
@@ -1185,12 +1202,23 @@ fun ProviderListingsScreen(
                                 color = if (selectedCategoryFilter != "All") Color(0xFFE8FAF4) else Color.White,
                                 border = BorderStroke(1.dp, if (selectedCategoryFilter != "All") NestoraMint else Color(0xFFDDE2E9))
                             ) {
-                                Text(
-                                    text = if (selectedCategoryFilter == "All") "Category â–¾" else "$selectedCategoryFilter â–¾",
-                                    fontSize = 12.sp,
-                                    color = if (selectedCategoryFilter != "All") NestoraMint else Color(0xFF444444),
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = if (selectedCategoryFilter == "All") "Category" else selectedCategoryFilter,
+                                        fontSize = 12.sp,
+                                        color = if (selectedCategoryFilter != "All") NestoraMint else Color(0xFF444444)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = if (selectedCategoryFilter != "All") NestoraMint else Color(0xFF444444),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                             val uniqueCategories = remember(listings) {
                                 listOf("All") + listings.map { it.categoryName }.distinct()
@@ -1211,7 +1239,7 @@ fun ProviderListingsScreen(
                             }
                         }
 
-                        // Service Type Dropdown Filter Chip
+                        // 4. Service Type Dropdown Filter Chip
                         Box {
                             Surface(
                                 modifier = Modifier.clickable { serviceTypeMenuExpanded = true },
@@ -1219,12 +1247,23 @@ fun ProviderListingsScreen(
                                 color = if (selectedServiceTypeFilter != "All") Color(0xFFE8FAF4) else Color.White,
                                 border = BorderStroke(1.dp, if (selectedServiceTypeFilter != "All") NestoraMint else Color(0xFFDDE2E9))
                             ) {
-                                Text(
-                                    text = if (selectedServiceTypeFilter == "All") "Service Type â–¾" else "${selectedServiceTypeFilter.replace("_", " ").replaceFirstChar { it.uppercase() }} â–¾",
-                                    fontSize = 12.sp,
-                                    color = if (selectedServiceTypeFilter != "All") NestoraMint else Color(0xFF444444),
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = if (selectedServiceTypeFilter == "All") "Service Type" else selectedServiceTypeFilter.replace("_", " ").replaceFirstChar { it.uppercase() },
+                                        fontSize = 12.sp,
+                                        color = if (selectedServiceTypeFilter != "All") NestoraMint else Color(0xFF444444)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = if (selectedServiceTypeFilter != "All") NestoraMint else Color(0xFF444444),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                             val uniqueServiceTypes = remember(listings) {
                                 listOf("All") + listings.map { it.serviceType }.distinct()
@@ -1245,7 +1284,7 @@ fun ProviderListingsScreen(
                             }
                         }
 
-                        // Quick Filter: Active status
+                        // 5. Quick Filter: Active status
                         val isActiveFilter = filterStatus == "Active"
                         Surface(
                             modifier = Modifier.clickable {
@@ -1259,7 +1298,7 @@ fun ProviderListingsScreen(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                         }
 
-                        // Quick Filter: Inactive status
+                        // 6. Quick Filter: Inactive status
                         val isInactiveFilter = filterStatus == "Inactive"
                         Surface(
                             modifier = Modifier.clickable {
@@ -1273,7 +1312,7 @@ fun ProviderListingsScreen(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                         }
 
-                        // Ratings Quick Filter
+                        // 7. Ratings Quick Filter
                         val ratingSelected = filterMinRating > 0f
                         Surface(
                             modifier = Modifier.clickable {
@@ -1286,12 +1325,23 @@ fun ProviderListingsScreen(
                             color = if (ratingSelected) Color(0xFFE8F5E9) else Color.White,
                             border = BorderStroke(1.dp, if (ratingSelected) NestoraMint else Color(0xFFDDE2E9))
                         ) {
-                            Text(
-                                text = if (ratingSelected) "â­ ${filterMinRating.toInt()}+" else "Ratings â–¾",
-                                fontSize = 12.sp,
-                                color = if (ratingSelected) NestoraMint else Color(0xFF444444),
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = if (ratingSelected) "Rating: ${filterMinRating.toInt()}+" else "Ratings",
+                                    fontSize = 12.sp,
+                                    color = if (ratingSelected) NestoraMint else Color(0xFF444444)
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = if (ratingSelected) NestoraMint else Color(0xFF444444),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1304,7 +1354,12 @@ fun ProviderListingsScreen(
             } else if (errorMessage != null) {
                 Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("âš ï¸", fontSize = 36.sp)
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color.Red,
+                            modifier = Modifier.size(36.dp)
+                        )
                         Spacer(Modifier.height(8.dp))
                         Text(errorMessage!!, color = Color.Red, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(16.dp))
@@ -1315,7 +1370,7 @@ fun ProviderListingsScreen(
                     }
                 }
             } else {
-                // â”€â”€ LazyColumn Container for Discovery Cards â”€â”€
+                // -- LazyColumn Container for Discovery Cards --
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -1340,7 +1395,12 @@ fun ProviderListingsScreen(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 64.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("ðŸ”", fontSize = 48.sp)
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = Color.Gray,
+                                    modifier = Modifier.size(48.dp)
+                                )
                                 Spacer(Modifier.height(12.dp))
                                 Text("No listings found", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F2E23))
                                 Spacer(Modifier.height(4.dp))
@@ -1353,13 +1413,13 @@ fun ProviderListingsScreen(
         }
     }
 
-    // â”€â”€ Filter Modal BottomSheet â”€â”€
+    // -- Filter Modal BottomSheet --
     if (showFilterSheet) {
         ModalBottomSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
-            Column(modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
+            Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.6f).navigationBarsPadding()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1367,7 +1427,7 @@ fun ProviderListingsScreen(
                 ) {
                     Text("Filter", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1C1C1C))
                     IconButton(onClick = { showFilterSheet = false }) {
-                        Text("âœ•", fontSize = 18.sp, color = Color.Gray)
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.Gray, modifier = Modifier.size(20.dp))
                     }
                 }
                 HorizontalDivider()
@@ -1447,12 +1507,12 @@ fun ProviderListingsScreen(
                                             onClick = { pendingMinRating = rating },
                                             colors = RadioButtonDefaults.colors(selectedColor = NestoraMint)
                                         )
-                                        Text(if (rating == 0f) "Any rating" else "â­ ${rating}+", fontSize = 13.sp, color = Color(0xFF333333))
+                                        Text(if (rating == 0f) "Any rating" else "Rating: ${rating}+", fontSize = 13.sp, color = Color(0xFF333333))
                                     }
                                 }
                             }
                             "Price Range" -> {
-                                Text("PRICE RANGE (â‚¹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                                Text("PRICE RANGE (Rs.)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
                                 Spacer(Modifier.height(12.dp))
                                 OutlinedTextField(
                                     value = pendingMinPrice,
@@ -1497,11 +1557,11 @@ fun ProviderListingsScreen(
                             filterMinRating = pendingMinRating
                             showFilterSheet = false
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD0D0D0)),
+                        colors = ButtonDefaults.buttonColors(containerColor = NestoraMint),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.width(130.dp)
                     ) {
-                        Text("Apply", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF333333))
+                        Text("Apply", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }
@@ -1580,7 +1640,7 @@ fun ProviderListingCard(
     val pagerState = rememberPagerState(pageCount = { 3 })
     val imageList = remember(listing.serviceType) { getServiceTypeImages(listing.serviceType) }
 
-    // â”€â”€ Zomato Structural Layout Card â”€â”€
+    // -- Zomato Structural Layout Card --
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -1591,7 +1651,7 @@ fun ProviderListingCard(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
 
-            // â”€â”€ 3. Image Slider Section (Top half of the card) â”€â”€
+            // -- 3. Image Slider Section (Top half of the card) --
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1651,7 +1711,7 @@ fun ProviderListingCard(
                 }
             }
 
-            // â”€â”€ 4. Restaurant Information Metadata (Middle section) â”€â”€
+            // -- 4. Restaurant Information Metadata (Middle section) --
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1703,7 +1763,7 @@ fun ProviderListingCard(
 
                 // Address & 7. Cover Range Row (service_radius_km)
                 Text(
-                    text = "${listing.location.ifBlank { "City Centre 2, Rajarhat" }} â€¢ Cover range: ${listing.serviceRadiusKm} km",
+                    text = "${listing.location.ifBlank { "City Centre 2, Rajarhat" }} - Cover range: ${listing.serviceRadiusKm} km",
                     fontSize = 13.sp,
                     color = Color(0xFF757575),
                     maxLines = 1,
@@ -1714,14 +1774,14 @@ fun ProviderListingCard(
 
                 // Cuisine / Service Row (without 'for two')
                 Text(
-                    text = "$categoryDisplayName, $serviceTypeDisplayName â€¢ â‚¹${listing.price.toInt()}",
+                    text = "$categoryDisplayName, $serviceTypeDisplayName - Rs.${listing.price.toInt()}",
                     fontSize = 13.sp,
                     color = Color(0xFF757575),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // â”€â”€ 9. Show description instead of offer and payment â”€â”€
+                // -- 9. Show description instead of offer and payment --
                 if (listing.description.isNotBlank()) {
                     Spacer(Modifier.height(10.dp))
                     HorizontalDivider(color = Color(0xFFF2F2F2))
@@ -1739,7 +1799,7 @@ fun ProviderListingCard(
                 HorizontalDivider(color = Color(0xFFF2F2F2))
                 Spacer(Modifier.height(8.dp))
 
-                // â”€â”€ 1. & 2. Toggle active & real count of created bookings on bottom left â”€â”€
+                // -- 1. & 2. Toggle active & real count of created bookings on bottom left --
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1756,7 +1816,7 @@ fun ProviderListingCard(
                                 if (resp?.ok == true) {
                                     isActive = active
                                     android.widget.Toast.makeText(context,
-                                        if (active) "âœ… Listing activated" else "â¸ Listing deactivated",
+                                        if (active) "Listing activated" else "Listing deactivated",
                                         android.widget.Toast.LENGTH_SHORT).show()
                                 } else {
                                     android.widget.Toast.makeText(context,

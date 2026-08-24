@@ -1,5 +1,6 @@
-﻿package com.estatenestora.app.ui.screens
+package com.estatenestora.app.ui.screens
 
+import com.estatenestora.app.ui.components.ProjectFooter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -107,13 +108,14 @@ fun ServicesScreen(
     }
     var isSearchExpanded by remember { mutableStateOf(false) }
 
-    val currentCategory = if (categories.isNotEmpty() && selectedCategoryIndex < categories.size) {
-        categories[selectedCategoryIndex]
+    val activeCategories = remember(categories) { categories.filter { it.isActive } }
+    val currentCategory = if (activeCategories.isNotEmpty() && selectedCategoryIndex < activeCategories.size) {
+        activeCategories[selectedCategoryIndex]
     } else null
 
     // Load service types dynamically once at screen mount
-    LaunchedEffect(categories) {
-        if (categories.isNotEmpty() && allServiceTypes.isEmpty()) {
+    LaunchedEffect(activeCategories) {
+        if (activeCategories.isNotEmpty() && allServiceTypes.isEmpty()) {
             isLoading = true
             try {
                 allServiceTypes = onLoadAllServiceTypes()
@@ -190,7 +192,7 @@ fun ServicesScreen(
             }
         }
 
-        if (categories.isEmpty() || (isLoading && allServiceTypes.isEmpty())) {
+        if (activeCategories.isEmpty() || (isLoading && allServiceTypes.isEmpty())) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -207,8 +209,8 @@ fun ServicesScreen(
                         .background(Color(0xFFF7F9F7))
                 ) {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(categories.size) { idx ->
-                            val cat = categories[idx]
+                        items(activeCategories.size) { idx ->
+                            val cat = activeCategories[idx]
                             val isSelected = idx == selectedCategoryIndex
                             Box(
                                 modifier = Modifier
@@ -244,7 +246,7 @@ fun ServicesScreen(
                     val catId = currentCategory?.id ?: ""
                     val list = remember(allServiceTypes, catId, searchQuery) {
                         allServiceTypes.filter {
-                            it.categorySlug == catId &&
+                            it.isActive && it.categorySlug == catId &&
                             (searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true) || it.description.contains(searchQuery, ignoreCase = true))
                         }
                     }
@@ -359,6 +361,7 @@ fun ServicesScreen(
                                     }
                                 }
                             }
+                            item { ProjectFooter() }
                         }
                     }
                 }
