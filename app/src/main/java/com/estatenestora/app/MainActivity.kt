@@ -417,15 +417,10 @@ class MainActivity : ComponentActivity() {
                 var currentLat by remember { mutableStateOf(addressBarLatitude ?: 0.0) }
                 var currentLon by remember { mutableStateOf(addressBarLongitude ?: 0.0) }
 
-<<<<<<< Updated upstream
                 // Keep the development booking flow intact: resolve the booking
                 // coordinates when the customer actually opens Book Now.
                 LaunchedEffect(locationGranted, bookingSheetListing) {
                     if (locationGranted && bookingSheetListing != null) {
-=======
-                LaunchedEffect(locationGranted) {
-                    if (locationGranted) {
->>>>>>> Stashed changes
                         try {
                             val loc = com.estatenestora.app.util.getCurrentLocation(context)
                             if (loc != null) {
@@ -435,22 +430,13 @@ class MainActivity : ComponentActivity() {
                         } catch (e: Exception) {}
                     }
                 }
-<<<<<<< Updated upstream
                 LaunchedEffect(addressBarLatitude, addressBarLongitude, authState) {
-=======
-                LaunchedEffect(currentLat, currentLon, authState) {
->>>>>>> Stashed changes
                     if (authState is TdLibManager.AuthState.Ready) {
                         try {
                             isLoadingFeed = true
                             val feedResp = repository.getFeedListings(
-<<<<<<< Updated upstream
                                 addressBarLatitude = addressBarLatitude,
                                 addressBarLongitude = addressBarLongitude
-=======
-                                addressBarLatitude = if (currentLat != 0.0) currentLat else null,
-                                addressBarLongitude = if (currentLon != 0.0) currentLon else null
->>>>>>> Stashed changes
                             )
                             feedListings = feedResp?.listings?.map { it.toServiceListing() } ?: emptyList()
                         } catch (e: Exception) {
@@ -1041,7 +1027,21 @@ class MainActivity : ComponentActivity() {
                                         selectedTabId = selectedTabId,
                                         onTabSelected = onTabSelected,
                                         currentTheme = todayTheme,
-                                        isLoadingFeed = isLoadingFeed
+                                        isLoadingFeed = isLoadingFeed,
+                                        onRefreshFeed = {
+                                            lifecycleScope.launch {
+                                                if (isLoadingFeed) return@launch
+                                                isLoadingFeed = true
+                                                try {
+                                                    feedListings = repository.getFeedListings(
+                                                        addressBarLatitude = addressBarLatitude,
+                                                        addressBarLongitude = addressBarLongitude
+                                                    )?.listings?.map { it.toServiceListing() } ?: emptyList()
+                                                } finally {
+                                                    isLoadingFeed = false
+                                                }
+                                            }
+                                        }
                                     )
 
                                     4 -> CategoriesScreen(
