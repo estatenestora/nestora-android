@@ -432,7 +432,106 @@ fun HomeScreen(
                             label = cat.name,
                             imageUrl = getRealLifeImageUrl(cat.id),
                             onClick = { onCategorySelected(cat) }
+                         )
+                    }
+                }
+            }
+        }
+
+        // ── AVAILABLE SERVICES & PROVIDERS NEAR YOU (HIRE MODE) ─────────────────
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White)
+                    .padding(top = 8.dp, bottom = 8.dp)
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    thickness = 0.8.dp,
+                    color = Color(0xFFEEEEEE)
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Featured Service Providers",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0D1A13)
                         )
+                        Text(
+                            text = "Verified professionals ready to hire near you",
+                            fontSize = 11.sp,
+                            color = NestoraTextMuted
+                        )
+                    }
+                    if (isLoadingFeed) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = NestoraMint
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+            }
+        }
+
+        if (filteredListings.isNotEmpty()) {
+            items(filteredListings) { listing ->
+                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    MarketplaceListingCard(
+                        listing = listing,
+                        onClick = { onListingClick(listing) },
+                        onBookViaTelegram = { onBookViaTelegram(listing) }
+                    )
+                }
+            }
+        } else if (!isLoadingFeed) {
+            item {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFFF7FAF8),
+                    border = BorderStroke(1.dp, Color(0xFFE2EBE5))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "⚡ Looking for specific help?",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0D1A13)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "Tap any service above or chat with AI to match with top providers instantly.",
+                            fontSize = 12.sp,
+                            color = NestoraTextMuted,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Button(
+                            onClick = onSearchClick,
+                            colors = ButtonDefaults.buttonColors(containerColor = NestoraMint),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Chat with Nestora AI", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        }
                     }
                 }
             }
