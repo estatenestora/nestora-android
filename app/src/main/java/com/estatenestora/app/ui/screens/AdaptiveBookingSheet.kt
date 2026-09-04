@@ -13,13 +13,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.estatenestora.app.data.model.BookingPolicy
 import com.estatenestora.app.data.model.AvailabilitySlot
 import com.estatenestora.app.data.model.ServiceListing
+import com.estatenestora.app.data.model.ListingServiceCatalog
+import com.estatenestora.app.data.model.ProviderServiceOffering
+import com.estatenestora.app.data.model.ProviderServicePackage
 import com.estatenestora.app.data.repository.NestoraRepository
 import com.estatenestora.app.ui.theme.NestoraMint
 import com.google.gson.JsonObject
+import com.google.gson.JsonArray
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -30,6 +35,318 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+
+internal fun providerPackageItemsLabel(pack: ProviderServicePackage): String =
+    pack.items.joinToString(", ") { offer ->
+        val quantityPrefix = if (offer.quantity > 1) "${offer.quantity} x " else ""
+        "$quantityPrefix${offer.title}"
+    }
+
+internal fun providerPackageItemsTotal(pack: ProviderServicePackage): Double =
+    pack.items.sumOf { it.priceAmount * it.quantity.coerceAtLeast(1) }
+
+internal fun providerPackageSavings(pack: ProviderServicePackage): Double =
+    (providerPackageItemsTotal(pack) - pack.packagePriceAmount).coerceAtLeast(0.0)
+
+internal data class CustomerServiceCartSummary(
+    val kind: String,
+    val title: String,
+    val itemCount: Int,
+    val providerAmount: Double,
+    val durationMinutes: Int
+)
+
+/** Builds a provider-scoped cart. One package may be combined with individual
+ * extras; custom requests remain exclusive. No provider/price data is
+ * accepted from the phone because the backend resolves every opaque id. */
+internal fun customerServiceSelectionPayload(
+    packageId: String?,
+    offeringQuantities: Map<String, Int>,
+    useListingPrice: Boolean
+): JsonObject? {
+    val cleanPackageId = packageId?.trim().orEmpty()
+    val cleanItems = offeringQuantities
+        .filterKeys { it.isNotBlank() }
+        .filterValues { it in 1..10 }
+    val hasCatalogSelection = cleanPackageId.isNotBlank() || cleanItems.isNotEmpty()
+    if (useListingPrice == hasCatalogSelection || cleanItems.size != offeringQuantities.size || cleanItems.size > 12) return null
+    return JsonObject().apply {
+        if (useListingPrice) {
+            addProperty("use_listing_price", true)
+        } else {
+            if (cleanPackageId.isNotBlank()) addProperty("package_id", cleanPackageId)
+            if (cleanItems.isNotEmpty()) add("items", JsonArray().apply {
+                cleanItems.toSortedMap().forEach { (id, quantity) ->
+                    add(JsonObject().apply {
+                        addProperty("offering_id", id)
+                        addProperty("quantity", quantity)
+                    })
+                }
+            })
+        }
+    }
+}
+
+internal fun customerServiceCartSummary(
+    catalog: ListingServiceCatalog,
+    packageId: String?,
+    offeringQuantities: Map<String, Int>,
+    useListingPrice: Boolean,
+    listingPrice: Double,
+    defaultDurationMinutes: Int
+): CustomerServiceCartSummary? {
+    if (customerServiceSelectionPayload(packageId, offeringQuantities, useListingPrice) == null) return null
+    if (useListingPrice) return CustomerServiceCartSummary(
+        kind = "LISTING",
+        title = "Custom service request",
+        itemCount = 0,
+        providerAmount = listingPrice.coerceAtLeast(0.0),
+        durationMinutes = defaultDurationMinutes.coerceAtLeast(5)
+    )
+    val pack = packageId?.takeIf { it.isNotBlank() }?.let { id -> catalog.packages.firstOrNull { it.id == id } ?: return null }
+    val selected = offeringQuantities.mapNotNull { (id, quantity) ->
+        catalog.offerings.firstOrNull { it.id == id }?.let { it to quantity }
+    }
+    if (selected.size != offeringQuantities.size) return null
+    if (pack != null) return CustomerServiceCartSummary(
+        kind = if (selected.isEmpty()) "PACKAGE" else "MIXED",
+        title = if (selected.isEmpty()) pack.name else "${pack.name} + ${selected.size} extra service(s)",
+        itemCount = pack.items.sumOf { it.quantity.coerceAtLeast(1) } + selected.sumOf { it.second },
+        providerAmount = pack.packagePriceAmount + selected.sumOf { (offer, quantity) -> offer.priceAmount * quantity },
+        durationMinutes = pack.durationMinutes + selected.sumOf { (offer, quantity) -> offer.durationMinutes * quantity }
+    )
+    return CustomerServiceCartSummary(
+        kind = "ITEMS",
+        title = if (selected.size == 1) selected.first().first.title else "${selected.first().first.title} + ${selected.size - 1} more",
+        itemCount = selected.sumOf { it.second },
+        providerAmount = selected.sumOf { (offer, quantity) -> offer.priceAmount * quantity },
+        durationMinutes = selected.sumOf { (offer, quantity) -> offer.durationMinutes * quantity }
+    )
+}
+
+internal fun providerOfferingCustomerDetails(offer: ProviderServiceOffering): List<String> = buildList {
+    offer.description.trim().takeIf { it.isNotBlank() }?.let { add("Includes: $it") }
+    val attributes = offer.attributeValues?.entrySet()
+        ?.mapNotNull { entry ->
+            val value = customerReadableAttributeValue(entry.value)
+            value.takeIf { it.isNotBlank() }?.let { "${customerReadableAttributeLabel(entry.key)}: $it" }
+        }
+        .orEmpty()
+    if (attributes.isNotEmpty()) add("Details: ${attributes.joinToString(" · ")}")
+}
+
+private fun customerReadableAttributeLabel(key: String): String = key.trim()
+    .replace('_', ' ')
+    .split(' ')
+    .filter { it.isNotBlank() }
+    .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
+
+private fun customerReadableAttributeValue(value: com.google.gson.JsonElement): String = when {
+    value.isJsonNull -> ""
+    value.isJsonArray -> value.asJsonArray.map(::customerReadableAttributeValue).filter { it.isNotBlank() }.joinToString(", ")
+    value.isJsonPrimitive && value.asJsonPrimitive.isBoolean -> if (value.asBoolean) "Yes" else "No"
+    value.isJsonPrimitive -> value.asString.trim()
+    else -> ""
+}
+
+@Composable
+internal fun CustomerServiceScopePicker(
+    listing: ServiceListing,
+    catalog: ListingServiceCatalog,
+    defaultDurationMinutes: Int,
+    selectedPackageId: String?,
+    selectedOfferingQuantities: Map<String, Int>,
+    useListingPrice: Boolean,
+    saving: Boolean,
+    onSelectPackage: (String) -> Unit,
+    onChangeOfferingQuantity: (String, Int) -> Unit,
+    onSelectListingPrice: () -> Unit,
+    onContinue: () -> Unit
+) {
+    val summary = customerServiceCartSummary(
+        catalog, selectedPackageId, selectedOfferingQuantities, useListingPrice,
+        listing.price, defaultDurationMinutes
+    )
+    Text("Choose what you need", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text(
+        "Add one complete package, individual work items, or combine a package with extra work from this provider. You pay only Nestora's booking fee now and the shown provider amount after the work.",
+        style = MaterialTheme.typography.bodySmall,
+        color = Color(0xFF60756B)
+    )
+    if (catalog.packages.isNotEmpty()) {
+        Text("Value packages", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        catalog.packages.forEach { pack ->
+            val selected = selectedPackageId == pack.id && !useListingPrice
+            val savings = providerPackageSavings(pack)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = if (selected) Color(0xFFE7F7F1) else Color.White,
+                border = BorderStroke(1.dp, if (selected) NestoraMint else Color(0xFFD9E3DF))
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Checkbox(selected, onCheckedChange = { onSelectPackage(pack.id) }, enabled = !saving)
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(pack.name, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                            Text("₹${"%.0f".format(pack.packagePriceAmount)}", fontWeight = FontWeight.ExtraBold, color = NestoraMint)
+                        }
+                        if (pack.description.isNotBlank()) Text(pack.description, style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+                        Text("${pack.durationMinutes} min · ${pack.items.sumOf { it.quantity.coerceAtLeast(1) }} work item(s)", style = MaterialTheme.typography.labelSmall, color = Color(0xFF486158))
+                        Text("Includes: ${providerPackageItemsLabel(pack)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF486158), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        if (pack.includedText.isNotBlank()) Text("Package includes: ${pack.includedText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF486158), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (savings > 0) Text("You save ₹${"%.0f".format(savings)}", style = MaterialTheme.typography.labelMedium, color = Color(0xFF14513D), fontWeight = FontWeight.Bold)
+                        if (pack.excludedText.isNotBlank()) Text("Not included: ${pack.excludedText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF8A4B00), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        OutlinedButton(
+                            onClick = { onSelectPackage(pack.id) },
+                            enabled = !saving,
+                            modifier = Modifier.align(androidx.compose.ui.Alignment.End)
+                        ) { Text(if (selected) "Remove package" else "Add package") }
+                    }
+                }
+            }
+        }
+    }
+    if (catalog.offerings.isNotEmpty()) {
+        Text("Individual work items", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        catalog.offerings.forEach { offer ->
+            val quantity = selectedOfferingQuantities[offer.id] ?: 0
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = if (quantity > 0) Color(0xFFE7F7F1) else Color.White,
+                border = BorderStroke(1.dp, if (quantity > 0) NestoraMint else Color(0xFFD9E3DF))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(offer.title, fontWeight = FontWeight.SemiBold)
+                        providerOfferingCustomerDetails(offer).forEach { detail ->
+                            Text(detail, style = MaterialTheme.typography.bodySmall, color = Color(0xFF486158), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text("₹${"%.0f".format(offer.priceAmount)} · ${offer.durationMinutes} min each", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+                    }
+                    if (quantity == 0) {
+                        OutlinedButton(
+                            onClick = { onChangeOfferingQuantity(offer.id, 1) },
+                            enabled = selectedOfferingQuantities.size < 12 && !saving,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                        ) { Text("Add") }
+                    } else {
+                        IconButton(
+                            onClick = { onChangeOfferingQuantity(offer.id, quantity - 1) },
+                            enabled = !saving
+                        ) { Text("−", style = MaterialTheme.typography.titleLarge) }
+                        Text(quantity.toString(), modifier = Modifier.widthIn(min = 20.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold)
+                        IconButton(
+                            onClick = { onChangeOfferingQuantity(offer.id, quantity + 1) },
+                            enabled = quantity < 10 && !saving
+                        ) { Icon(Icons.Default.Add, contentDescription = "Add one ${offer.title}") }
+                    }
+                }
+            }
+        }
+    }
+    if (catalog.packages.isEmpty() && catalog.offerings.isEmpty()) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFFF7F9F8),
+            border = BorderStroke(1.dp, Color(0xFFD9E3DF))
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("No packages or priced items yet", fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
+                Text(
+                    "This provider has not published a service catalog for this service type. You can still send a custom request using the listing's starting price.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF60756B)
+                )
+            }
+        }
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(enabled = !saving, onClick = onSelectListingPrice),
+        shape = RoundedCornerShape(12.dp),
+        color = if (useListingPrice) Color(0xFFE7F7F1) else Color.White,
+        border = BorderStroke(1.dp, if (useListingPrice) NestoraMint else Color(0xFFD9E3DF))
+    ) {
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            RadioButton(selected = useListingPrice, onClick = null)
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Custom service request", fontWeight = FontWeight.SemiBold)
+                Text("Starting from ₹${listing.price.toInt()}. The provider may confirm the final work amount before acceptance.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+            }
+        }
+    }
+    if (summary != null) {
+        Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFFF0F8F4), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Your cart", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFF486158))
+                Text(summary.title, fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
+                Text(
+                    if (summary.kind == "LISTING") "Starting from ₹${summary.providerAmount.toInt()} · provider confirms final amount"
+                    else "${summary.itemCount} item(s) · ₹${summary.providerAmount.toInt()} provider amount · ${summary.durationMinutes} min",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF486158)
+                )
+            }
+        }
+    }
+    Button(
+        onClick = onContinue,
+        enabled = summary != null && !saving,
+        modifier = Modifier.fillMaxWidth().height(52.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
+    ) {
+        if (saving) CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp)
+        else Text(
+            when (summary?.kind) {
+                "PACKAGE" -> "Continue with package"
+                "MIXED" -> "Continue with cart"
+                "ITEMS" -> "Continue with cart"
+                else -> "Continue with custom request"
+            },
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun SelectedServiceScopeSummary(
+    summary: CustomerServiceCartSummary,
+    onChange: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFFF4F8F6),
+        border = BorderStroke(1.dp, Color(0xFFD9E8E0))
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(if (summary.kind == "PACKAGE") "Selected package" else "Selected service scope", fontWeight = FontWeight.Bold, color = Color(0xFF486158))
+                TextButton(onClick = onChange, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) { Text("Change") }
+            }
+            Text(summary.title, fontWeight = FontWeight.ExtraBold, color = Color(0xFF15231D))
+            Text(
+                if (summary.kind == "LISTING") "Starting from ₹${summary.providerAmount.toInt()}; the provider confirms the final amount."
+                else "${summary.itemCount} item(s) · ₹${summary.providerAmount.toInt()} provider amount · ${summary.durationMinutes} min",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF486158)
+            )
+            Text("The provider amount is paid directly after work. Nestora's booking fee is handled separately after provider acceptance.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+        }
+    }
+}
 
 // P3's one sheet adapts from catalog policy instead of maintaining a flow per
 // service. It writes only P2 app drafts; no legacy CREATE_BOOKING call is used.
@@ -37,16 +354,22 @@ import androidx.compose.material.icons.filled.ArrowBack
 @Composable
 fun AdaptiveBookingSheet(
     listing: ServiceListing,
+    initialPackageId: String? = null,
+    initialOfferingQuantities: Map<String, Int> = emptyMap(),
+    initialUseListingPrice: Boolean = false,
     initialLocationText: String,
     initialLat: Double,
     initialLon: Double,
     onDismiss: () -> Unit,
     onFetchPolicy: suspend (String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
     onFetchAvailability: suspend (String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
+    onFetchServiceCatalog: suspend (String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
+    onFetchDraftAvailability: suspend (String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
     onCreateDraft: suspend (String, String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
     onSetLocation: suspend (String, Boolean, Double, Double, String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
     onSetSchedule: suspend (String, String?, String?, String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
     onSetTimePreference: suspend (String, String, JsonObject) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
+    onSetServiceSelection: suspend (String, JsonObject) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
     onSetNote: suspend (String, String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
     onSetAnswer: suspend (String, String, String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
     onSubmit: suspend (String) -> com.estatenestora.app.data.model.AndroidBridgeResponse?,
@@ -65,6 +388,18 @@ fun AdaptiveBookingSheet(
     var note by remember { mutableStateOf("") }
     var durationMinutes by remember { mutableStateOf(120) }
     var availabilitySlots by remember { mutableStateOf<List<AvailabilitySlot>>(emptyList()) }
+    var serviceCatalog by remember { mutableStateOf<ListingServiceCatalog?>(null) }
+    var serviceCatalogUnavailable by remember { mutableStateOf(false) }
+    var selectionSaving by remember { mutableStateOf(false) }
+    var selectedPackageId by remember(listing.id, initialPackageId) { mutableStateOf(initialPackageId) }
+    var useListingPriceSelection by remember(listing.id, initialUseListingPrice) { mutableStateOf(initialUseListingPrice) }
+    var serviceSelectionApplied by remember { mutableStateOf(false) }
+    var selectionNotice by remember { mutableStateOf<String?>(null) }
+    val selectedOfferingQuantities = remember(listing.id, initialOfferingQuantities) {
+        mutableStateMapOf<String, Int>().apply {
+            initialOfferingQuantities.filterValues { it in 1..10 }.forEach { (id, quantity) -> put(id, quantity) }
+        }
+    }
     var selectedSlot by remember { mutableStateOf<AvailabilitySlot?>(null) }
     var flexibleStartDate by remember { mutableStateOf(java.time.LocalDate.now().plusDays(1).toString()) }
     var flexibleEndDate by remember { mutableStateOf(java.time.LocalDate.now().plusDays(3).toString()) }
@@ -149,7 +484,12 @@ fun AdaptiveBookingSheet(
             }
         } catch (_: Exception) {}
 
-        val response = onFetchAvailability(listing.id)
+        val activeDraftId = draftId
+        val response = if (serviceSelectionApplied && !activeDraftId.isNullOrBlank()) {
+            onFetchDraftAvailability(activeDraftId)
+        } else {
+            onFetchAvailability(listing.id)
+        }
         if (response?.ok != true) {
             if (showChangeMessage) error = "Could not refresh live provider availability. Your selected time was not submitted. Please try again."
             return false
@@ -174,8 +514,28 @@ fun AdaptiveBookingSheet(
     LaunchedEffect(listing.id) {
         loading = true; error = null
         val policyResponse = onFetchPolicy(listing.id)
-        policy = policyResponse?.bookingPolicy
-        policy?.let { loaded ->
+        val loadedPolicy = policyResponse?.bookingPolicy
+        policy = loadedPolicy
+        val catalogResponse = onFetchServiceCatalog(listing.id)
+        val loadedCatalog = catalogResponse?.serviceCatalog
+        serviceCatalog = loadedCatalog
+        serviceCatalogUnavailable = catalogResponse?.ok != true || loadedCatalog == null
+        // Even an empty catalogue must show the scope step so the customer
+        // explicitly chooses a custom request instead of silently bypassing it.
+        serviceSelectionApplied = false
+        val cleanInitialPackageId = initialPackageId?.takeIf { id -> loadedCatalog?.packages?.any { it.id == id } == true }
+        val cleanInitialItems = initialOfferingQuantities
+            .filterValues { it in 1..10 }
+            .filterKeys { id -> loadedCatalog?.offerings?.any { it.id == id } == true }
+        val cleanInitialListingPrice = initialUseListingPrice && cleanInitialPackageId == null && cleanInitialItems.isEmpty()
+        selectedPackageId = cleanInitialPackageId
+        selectedOfferingQuantities.clear()
+        selectedOfferingQuantities.putAll(cleanInitialItems)
+        useListingPriceSelection = cleanInitialListingPrice
+        if (serviceCatalogUnavailable) {
+            error = catalogResponse?.reply?.ifBlank { null } ?: "Could not load this provider's service options. Try again before continuing."
+        }
+        loadedPolicy?.let { loaded ->
             val terms = loaded.timeTerms.ifEmpty {
                 buildList {
                     if (loaded.timingModes.contains("NOW")) add("NOW")
@@ -196,14 +556,32 @@ fun AdaptiveBookingSheet(
 				}
 			}
         }
-        val response = policy?.let { onCreateDraft(listing.id, UUID.randomUUID().toString()) }
+        val response = loadedPolicy?.let { onCreateDraft(listing.id, UUID.randomUUID().toString()) }
         draftId = response?.engagementDraft?.id
-        if (policy == null || draftId == null) {
+        if (loadedPolicy == null || draftId == null) {
             error = bookingStartFailureMessage(
-                policyLoaded = policy != null,
+                policyLoaded = loadedPolicy != null,
                 policyReply = policyResponse?.reply,
                 draftReply = response?.reply
             )
+        } else if (loadedCatalog != null) {
+            val initialSelection = customerServiceSelectionPayload(
+                cleanInitialPackageId,
+                cleanInitialItems,
+                cleanInitialListingPrice
+            )
+            if (initialSelection != null) {
+                selectionSaving = true
+                val savedSelection = onSetServiceSelection(draftId!!, initialSelection)
+                if (savedSelection?.ok == true) {
+                    serviceSelectionApplied = true
+                    availabilitySlots = onFetchDraftAvailability(draftId!!)?.availabilitySlots ?: availabilitySlots
+                    selectionNotice = "Your cart is ready. Choose when you need the service."
+                } else {
+                    error = savedSelection?.reply ?: "Could not prepare your selected services. Return to the cart and try again."
+                }
+                selectionSaving = false
+            }
         }
         loading = false
     }
@@ -246,6 +624,109 @@ fun AdaptiveBookingSheet(
             } else {
                 val p = policy
                 if (p != null) {
+					val catalog = serviceCatalog
+					val cartSummary = catalog?.let {
+						customerServiceCartSummary(
+							it, selectedPackageId, selectedOfferingQuantities, useListingPriceSelection,
+							listing.price, p.defaultDurationMinutes
+						)
+					}
+					val serviceSelectionPayload = catalog?.let {
+						customerServiceSelectionPayload(
+							selectedPackageId, selectedOfferingQuantities, useListingPriceSelection
+						)
+					}
+					val applyCurrentSelection: () -> Unit = {
+						val selection = customerServiceSelectionPayload(
+							selectedPackageId, selectedOfferingQuantities, useListingPriceSelection
+						)
+						scope.launch {
+							val currentDraftId = draftId
+							if (currentDraftId == null || selection == null) {
+								error = if (currentDraftId == null) {
+									"This booking form is no longer active. Open the service again to choose work."
+								} else {
+									"Add a package, individual work items, both together, or choose a custom service request."
+								}
+								return@launch
+							}
+							selectionSaving = true
+							error = null
+							selectionNotice = null
+							val response = onSetServiceSelection(currentDraftId, selection)
+							if (response?.ok == true) {
+								selectedSlot = null
+								selectedFlexibleSlot = null
+								availabilitySlots = onFetchDraftAvailability(currentDraftId)?.availabilitySlots ?: emptyList()
+								serviceSelectionApplied = true
+								selectionNotice = "Service scope added. Available times now match the expected work duration."
+							} else {
+								error = response?.reply ?: "Could not add the selected service scope. Please try again."
+							}
+							selectionSaving = false
+						}
+					}
+					if (serviceCatalogUnavailable) {
+						error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+						OutlinedButton(
+							onClick = {
+								scope.launch {
+									selectionSaving = true
+									val response = onFetchServiceCatalog(listing.id)
+									val refreshedCatalog = response?.serviceCatalog
+									if (response?.ok == true && refreshedCatalog != null) {
+										serviceCatalog = refreshedCatalog
+										serviceCatalogUnavailable = false
+										serviceSelectionApplied = false
+										error = null
+									} else {
+										error = response?.reply ?: "Service options are still unavailable. Check your connection and try again."
+									}
+									selectionSaving = false
+								}
+							},
+							enabled = !selectionSaving,
+							modifier = Modifier.fillMaxWidth()
+						) { Text(if (selectionSaving) "Loading service options" else "Try again") }
+					} else if (catalog != null && !serviceSelectionApplied) {
+						CustomerServiceScopePicker(
+							listing = listing,
+							catalog = catalog,
+							selectedPackageId = selectedPackageId,
+							selectedOfferingQuantities = selectedOfferingQuantities,
+							useListingPrice = useListingPriceSelection,
+							defaultDurationMinutes = p.defaultDurationMinutes,
+							saving = selectionSaving,
+							onSelectPackage = { packageId ->
+								selectedPackageId = if (selectedPackageId == packageId) null else packageId
+								useListingPriceSelection = false
+								error = null
+							},
+							onChangeOfferingQuantity = { offeringId, quantity ->
+								useListingPriceSelection = false
+								if (quantity <= 0) selectedOfferingQuantities.remove(offeringId)
+								else selectedOfferingQuantities[offeringId] = quantity.coerceAtMost(10)
+								error = null
+							},
+							onSelectListingPrice = {
+								selectedPackageId = null
+								selectedOfferingQuantities.clear()
+								useListingPriceSelection = true
+								error = null
+							},
+							onContinue = applyCurrentSelection
+						)
+						error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+					} else {
+						cartSummary?.let { summary ->
+							SelectedServiceScopeSummary(summary = summary, onChange = {
+								serviceSelectionApplied = false
+								selectionNotice = null
+								selectedSlot = null
+								selectedFlexibleSlot = null
+							})
+						}
+						selectionNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Color(0xFF14513D)) }
                     val timeTerms = p.timeTerms.ifEmpty {
                         buildList {
                             if (p.timingModes.contains("NOW")) add("NOW")
@@ -482,7 +963,11 @@ fun AdaptiveBookingSheet(
 								}
 
                                 var failedStep = "request submission"
-                                suspend fun saveAndSubmit(activeDraftId: String): com.estatenestora.app.data.model.AndroidBridgeResponse? {
+                                suspend fun saveAndSubmit(activeDraftId: String, replayServiceSelection: Boolean): com.estatenestora.app.data.model.AndroidBridgeResponse? {
+                                    if (replayServiceSelection && serviceSelectionPayload != null) {
+                                        val savedScope = onSetServiceSelection(activeDraftId, serviceSelectionPayload)
+                                        if (savedScope?.ok != true) { failedStep = "selected services"; return savedScope }
+                                    }
                                     val location = onSetLocation(activeDraftId, true, initialLat, initialLon, initialLocationText)
                                     if (location?.ok != true) { failedStep = "service location"; return location }
                                     if (term != null) {
@@ -513,7 +998,7 @@ fun AdaptiveBookingSheet(
                                 }
 
                                 submitting = true; error = null
-                                var submitted = saveAndSubmit(id)
+                                var submitted = saveAndSubmit(id, replayServiceSelection = false)
                                 // A draft can become stale after the sheet opened (for
                                 // example after an app reconnect). Preserve every typed
                                 // value, create one fresh draft, and replay the form once.
@@ -522,7 +1007,7 @@ fun AdaptiveBookingSheet(
                                     val refreshedId = refreshed?.engagementDraft?.id
                                     if (refreshed?.ok == true && !refreshedId.isNullOrBlank()) {
                                         draftId = refreshedId
-                                        submitted = saveAndSubmit(refreshedId)
+                                        submitted = saveAndSubmit(refreshedId, replayServiceSelection = true)
                                     } else {
                                         submitted = refreshed
                                     }
@@ -537,6 +1022,7 @@ fun AdaptiveBookingSheet(
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
                     ) { if (submitting) CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp) else Text(if (p.commitmentGate == "DIRECT") "Request service" else "Send request", fontWeight = FontWeight.Bold) }
+					}
                 }
             }
         }

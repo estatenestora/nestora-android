@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.LocationOn
 import com.estatenestora.app.ui.screens.CategoriesScreen
 import com.estatenestora.app.ui.screens.ServicesScreen
@@ -50,8 +51,10 @@ import com.estatenestora.app.data.model.Category
 import com.estatenestora.app.data.model.ServiceListing
 import com.estatenestora.app.data.model.TelegramChatMessage
 import com.estatenestora.app.data.model.UserProfile
+import com.estatenestora.app.data.model.ProviderDashboardSummary
 import com.estatenestora.app.data.repository.BookingPollingController
 import com.estatenestora.app.data.repository.NestoraRepository
+import com.estatenestora.app.data.repository.shouldRefreshBookingsForRoute
 import com.estatenestora.app.data.telegram.TdLibManager
 import com.estatenestora.app.ui.auth.TelegramAuthScreen
 import com.estatenestora.app.ui.screens.AIChatScreen
@@ -69,8 +72,12 @@ import com.estatenestora.app.ui.screens.RegisterServiceScreen
 import com.estatenestora.app.ui.screens.RegisterChoiceScreen
 import com.estatenestora.app.ui.screens.AutoRegisterScreen
 import com.estatenestora.app.ui.screens.AdminPaymentsScreen
+import com.estatenestora.app.ui.screens.AdminMediaScreen
 import com.estatenestora.app.ui.screens.FinderChoiceScreen
 import com.estatenestora.app.ui.theme.*
+import com.estatenestora.app.ui.screens.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import kotlinx.coroutines.launch
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
@@ -87,6 +94,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.gestures.detectDragGestures
+import com.google.gson.Gson
 
 class MainActivity : ComponentActivity() {
 
@@ -109,9 +117,9 @@ class MainActivity : ComponentActivity() {
         TdLibManager.init(applicationContext)
 
         setContent {
-            // The original mint palette remains the default. Dynamic colour
-            // rotation is explicitly enabled at build time with
-            // NESTORA_DYNAMIC_THEME=true.
+            // The fixed Nestora green/teal palette is the production default.
+            // Dynamic colour rotation remains an explicit build-time preview
+            // option through NESTORA_DYNAMIC_THEME=true.
             val appRoyalTheme = remember {
                 if (BuildConfig.DYNAMIC_THEME_ENABLED) {
                     RoyalThemeRepository.themes.random()
@@ -119,9 +127,22 @@ class MainActivity : ComponentActivity() {
                     RoyalThemeRepository.legacyMintTheme
                 }
             }
-            NestoraTheme(darkTheme = false, royalTheme = appRoyalTheme) {
                 val context = LocalContext.current
                 val prefs = remember(context) { context.getSharedPreferences("nestora_prefs", Context.MODE_PRIVATE) }
+
+                var currentLanguage by remember {
+                    mutableStateOf(
+                        com.estatenestora.app.ui.theme.NestoraLanguage.fromCode(
+                            prefs.getString("app_language", "en") ?: "en"
+                        )
+                    )
+                }
+                val currentStrings = com.estatenestora.app.ui.theme.stringsForLanguage(currentLanguage)
+
+                androidx.compose.runtime.CompositionLocalProvider(
+                    com.estatenestora.app.ui.theme.LocalNestoraStrings provides currentStrings
+                ) {
+                    NestoraTheme(darkTheme = false, royalTheme = appRoyalTheme) {
                 
                 var guestMode by remember { mutableStateOf(prefs.getBoolean("guest_mode", false)) }
                 var mapPickerSource by remember { mutableStateOf("") }
@@ -135,6 +156,8 @@ class MainActivity : ComponentActivity() {
                 var loaderAddressText by remember { mutableStateOf("") }
                 var selectedRegisterTab by remember { mutableStateOf(0) }
                 var selectedFinderTab by remember { mutableStateOf(0) }
+                var providerNestedPageOpen by remember { mutableStateOf(false) }
+                var providerListingsInitialSection by remember { mutableStateOf("listings") }
                 val scope = rememberCoroutineScope()
 
                 val hasLocationPerm = remember {
@@ -247,53 +270,54 @@ class MainActivity : ComponentActivity() {
                 }
 
                 var isProviderMode by remember { mutableStateOf(prefs.getBoolean("provider_mode", false)) }
-                var activeScreen by remember { mutableStateOf(if (isProviderMode) "register_choice" else "main") }
+                var activeScreen by remember { mutableStateOf(if (isProviderMode) "dashboard" else "main") }
                 var selectedTab by remember { mutableStateOf(if (isProviderMode) 0 else 1) } // Default to Finder (1st tab in Hire mode)
                 val onModeToggle = {
                     isProviderMode = !isProviderMode
                     prefs.edit().putBoolean("provider_mode", isProviderMode).apply()
                     if (isProviderMode) {
-                        // Switched to Provider: Explore (0) and Finder (1) are not allowed
-                        if (selectedTab == 0 || selectedTab == 1) {
-                            selectedRegisterTab = 0
-                            activeScreen = "register_choice"
-                        }
+                        activeScreen = "dashboard"
                     } else {
-                        // Switched to Customer: Register is not allowed
-                        if (activeScreen == "register_choice" || activeScreen == "register_service" || activeScreen == "auto_register") {
+                        if (activeScreen in listOf("dashboard", "listings", "register_choice", "register_service", "auto_register")) {
                             activeScreen = "main"
-                            selectedTab = 1 // default to Finder (1st tab in Hire mode)
                         }
+                        selectedTab = 1
                     }
                 }
                 val fullTabsList = remember {
                     listOf(
+                        com.estatenestora.app.ui.theme.NestoraTab("dashboard", "Dashboard", "📊", visibleInHireMode = false, visibleInServeMode = true),
                         com.estatenestora.app.ui.theme.NestoraTab("finder", "Finder", "🔍", visibleInHireMode = true, visibleInServeMode = false),
                         com.estatenestora.app.ui.theme.NestoraTab("register", "Register", "🧰", visibleInHireMode = false, visibleInServeMode = true),
-                        com.estatenestora.app.ui.theme.NestoraTab("bookings", "Bookings", "🧾", visibleInHireMode = true, visibleInServeMode = true),
+                        com.estatenestora.app.ui.theme.NestoraTab("listings", "Listings", "📋", visibleInHireMode = false, visibleInServeMode = true),
+                        com.estatenestora.app.ui.theme.NestoraTab("bookings", "Bookings", "🧾", visibleInHireMode = false, visibleInServeMode = true),
                         com.estatenestora.app.ui.theme.NestoraTab("explore", "Explore", "🧭", visibleInHireMode = true, visibleInServeMode = false)
                     )
                 }
                 val activeTabsList = remember(isProviderMode) {
-                    fullTabsList.filter { 
-                        if (isProviderMode) it.visibleInServeMode else it.visibleInHireMode 
-                    }
+                    fullTabsList.filter { if (isProviderMode) it.visibleInServeMode else it.visibleInHireMode }
                 }
                 val todayTheme = appRoyalTheme
                 val selectedTabId = remember(activeScreen, selectedTab) {
-                    if (activeScreen == "register_choice" || activeScreen == "register_service" || activeScreen == "auto_register") {
-                        "register"
-                    } else {
-                        when (selectedTab) {
-                            0 -> "explore"
-                            1 -> "finder"
-                            2 -> "bookings"
-                            else -> "explore"
+                    when (activeScreen) {
+                        "dashboard" -> "dashboard"
+                        "listings" -> "listings"
+                        "register_choice", "register_service", "auto_register" -> "register"
+                        else -> {
+                            when (selectedTab) {
+                                0 -> "explore"
+                                1 -> "finder"
+                                2 -> "bookings"
+                                else -> "explore"
+                            }
                         }
                     }
                 }
                 val onTabSelected = { tabId: String ->
                     when (tabId) {
+                        "dashboard" -> {
+                            activeScreen = "dashboard"
+                        }
                         "explore" -> {
                             activeScreen = "main"
                             selectedTab = 0
@@ -306,6 +330,10 @@ class MainActivity : ComponentActivity() {
                         "register" -> {
                             selectedRegisterTab = 0
                             activeScreen = "register_choice"
+                        }
+                        "listings" -> {
+                            providerListingsInitialSection = "listings"
+                            activeScreen = "listings"
                         }
                         "bookings" -> {
                             activeScreen = "main"
@@ -354,10 +382,16 @@ class MainActivity : ComponentActivity() {
                     return sdf.format(java.util.Date())
                 }
                 var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
+                var appMedia by remember { mutableStateOf<List<com.estatenestora.app.data.model.MediaAsset>>(emptyList()) }
                 var feedListings by remember { mutableStateOf<List<ServiceListing>>(emptyList()) }
                 var isLoadingFeed by remember { mutableStateOf(false) }
                 val bookings by bookingPolling.bookings.collectAsState()
                 val bookingDetail by bookingPolling.detail.collectAsState()
+                var providerDashboardSummary by remember { mutableStateOf<ProviderDashboardSummary?>(null) }
+                var isProviderDashboardLoading by remember { mutableStateOf(false) }
+                var providerDashboardLoadFailed by remember { mutableStateOf(false) }
+                var providerDashboardRefreshVersion by remember { mutableIntStateOf(0) }
+                var nestoraMoneyReturnScreen by remember { mutableStateOf("main") }
                 var shownAnimationBookingIds by remember { mutableStateOf(setOf<String>()) }
 
                 LaunchedEffect(bookingDetail) {
@@ -371,6 +405,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 var selectedBookingId by remember { mutableStateOf<String?>(null) }
+                var bookingDetailReturnToCustomerBookings by remember { mutableStateOf(false) }
                 
                 // Deep link routing check
                 val currentIntent = (context as? MainActivity)?.intent
@@ -388,6 +423,44 @@ class MainActivity : ComponentActivity() {
                 }
 
                 var bookingSheetListing by remember { mutableStateOf<ServiceListing?>(null) }
+                var serviceCatalogListing by remember { mutableStateOf<ServiceListing?>(null) }
+                val cartGson = remember { Gson() }
+                var customerCart by remember {
+                    mutableStateOf(
+                        prefs.getString("customer_provider_cart", null)?.let { raw ->
+                            runCatching { cartGson.fromJson(raw, CustomerProviderCart::class.java) }.getOrNull()
+                        }
+                    )
+                }
+                val updateCustomerCart: (CustomerProviderCart?) -> Unit = { updated ->
+                    customerCart = updated
+                    prefs.edit().apply {
+                        if (updated == null) remove("customer_provider_cart")
+                        else putString("customer_provider_cart", cartGson.toJson(updated))
+                    }.apply()
+                }
+                var showCartOnly by remember { mutableStateOf(false) }
+                val openCustomerCart: () -> Unit = {
+                    val cart = customerCart
+                    if (cart == null) {
+                        Toast.makeText(context, "Your cart is empty. Open a provider to add services.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        serviceCatalogListing = cart.listing
+                        showCartOnly = true
+                        activeScreen = "customer_cart"
+                    }
+                }
+
+                val openProviderServices: (ServiceListing) -> Unit = { listing ->
+                    serviceCatalogListing = listing
+                    showCartOnly = false
+                    activeScreen = "service_catalog"
+                }
+                val startBooking: (ServiceListing) -> Unit = { listing ->
+                    // All customer booking entry points use the same provider
+                    // storefront. Checkout opens the structured time/details flow.
+                    openProviderServices(listing)
+                }
 
                 var currentLat by remember { mutableStateOf(addressBarLatitude ?: 0.0) }
                 var currentLon by remember { mutableStateOf(addressBarLongitude ?: 0.0) }
@@ -422,10 +495,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val defaultBackActiveScreen = if (isProviderMode) "register_choice" else "main"
+                val defaultBackActiveScreen = if (isProviderMode) "dashboard" else "main"
                 val defaultBackSelectedTab = if (isProviderMode) 0 else 1
                 val isBackEnabled = if (isProviderMode) {
-                    activeScreen != "register_choice" || selectedRegisterTab != 0
+                    activeScreen != "dashboard"
                 } else {
                     activeScreen != "main" || selectedTab != 1
                 }
@@ -434,11 +507,36 @@ class MainActivity : ComponentActivity() {
                     if (activeScreen == "booking_detail") {
                         bookingPolling.closeDetail()
                         selectedBookingId = null
+                        if (bookingDetailReturnToCustomerBookings) {
+                            bookingDetailReturnToCustomerBookings = false
+                            activeScreen = "customer_bookings"
+                        } else {
+                            activeScreen = "main"
+                            selectedTab = 2
+                        }
+                    } else if (activeScreen == "customer_bookings") {
                         activeScreen = "main"
-                        selectedTab = 2
+                        selectedTab = 3
+                    } else if (activeScreen == "customer_cart") {
+                        activeScreen = "service_catalog"
+                        showCartOnly = false
+                    } else if (activeScreen == "service_catalog") {
+                        activeScreen = "main"
+                        serviceCatalogListing = null
+                        showCartOnly = false
+                    } else if (activeScreen == "add_balance") {
+                        activeScreen = "nestora_money"
+                    } else if (activeScreen == "nestora_money") {
+                        activeScreen = nestoraMoneyReturnScreen
+                        if (nestoraMoneyReturnScreen == "main") selectedTab = 3
+                        nestoraMoneyReturnScreen = "main"
                     } else if (activeScreen == "map_picker") {
                         if (mapPickerSource == "register_choice") {
                             activeScreen = "register_choice"
+                        } else if (mapPickerSource == "listings") {
+                            activeScreen = "listings"
+                        } else if (mapPickerSource == "dashboard") {
+                            activeScreen = "dashboard"
                         } else if (mapPickerSource == "booking_details") {
                             activeScreen = "booking_detail"
                         } else {
@@ -449,6 +547,8 @@ class MainActivity : ComponentActivity() {
                             if (activeScreen == "register_service" || activeScreen == "auto_register" || selectedRegisterTab != 0) {
                                 selectedRegisterTab = 0
                                 activeScreen = "register_choice"
+                            } else {
+                                activeScreen = "dashboard"
                             }
                         } else {
                             activeScreen = "main"
@@ -456,6 +556,8 @@ class MainActivity : ComponentActivity() {
                         }
                     } else if (activeScreen == "booking_loader") {
                         activeScreen = "main"
+                    } else if (isProviderMode && activeScreen == "main") {
+                        activeScreen = "dashboard"
                     } else if (activeScreen == "main" && selectedTab != defaultBackSelectedTab) {
                         selectedTab = defaultBackSelectedTab
                     } else {
@@ -491,6 +593,36 @@ class MainActivity : ComponentActivity() {
                     }
                     lifecycleOwner.lifecycle.addObserver(observer)
                     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                }
+
+                // The controller performs one coalesced full fetch when this
+                // page becomes visible, then uses FCM plus a low-frequency
+                // delta fallback. Without this visibility signal the new
+                // Bookings page could render its initial empty list forever.
+                LaunchedEffect(authState, activeScreen, selectedTab) {
+                    bookingPolling.setBookingsScreenVisible(
+                        shouldRefreshBookingsForRoute(
+                            authenticated = authState is TdLibManager.AuthState.Ready,
+                            activeScreen = activeScreen,
+                            selectedTab = selectedTab
+                        )
+                    )
+                }
+
+                // The dashboard is a single aggregated read when it becomes visible.
+                // It deliberately does not poll or fan out into bookings/listings/wallet calls.
+                LaunchedEffect(authState, activeScreen, providerDashboardRefreshVersion) {
+                    if (authState is TdLibManager.AuthState.Ready && activeScreen == "dashboard") {
+                        isProviderDashboardLoading = true
+                        val latest = repository.getProviderDashboard()
+                        if (latest != null) {
+                            providerDashboardSummary = latest
+                            providerDashboardLoadFailed = false
+                        } else {
+                            providerDashboardLoadFailed = true
+                        }
+                        isProviderDashboardLoading = false
+                    }
                 }
 
 
@@ -595,6 +727,7 @@ class MainActivity : ComponentActivity() {
                                 kotlinx.coroutines.delay(3000)
                             }
                         }
+                        appMedia = repository.getAppMedia()?.mediaAssets.orEmpty()
 
                         // Load initial feed of service providers for HIRE mode
                         scope.launch {
@@ -633,15 +766,15 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Lazy retry: covers the backend coming up well after the loop
-                // above already gave up — try again whenever the user visits
-                // Explore and still has nothing to show.
-                LaunchedEffect(selectedTab) {
-                    if (selectedTab == 0 && authState is TdLibManager.AuthState.Ready) {
+                // Re-check the repository whenever Explore becomes visible.
+                // Unchanged data is served from its bounded memory cache.
+                // A successful provider write invalidates that cache first.
+                LaunchedEffect(selectedTab, activeScreen) {
+                    if (activeScreen == "main" && selectedTab == 0 && authState is TdLibManager.AuthState.Ready) {
                         if (categories.isEmpty()) {
                             categories = repository.getCategories()
                         }
-                        if (feedListings.isEmpty() && !isLoadingFeed) {
+                        if (!isLoadingFeed) {
                             try {
                                 isLoadingFeed = true
                                 val feedResp = repository.getFeedListings(
@@ -715,6 +848,31 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val primaryDestination = primaryDestinationFor(
+                    isProviderMode = isProviderMode,
+                    activeScreen = activeScreen,
+                    selectedTab = selectedTab
+                )
+                val showPrimaryNavigation = shouldShowPrimaryNavigation(
+                    isProviderMode = isProviderMode,
+                    activeScreen = activeScreen,
+                    selectedTab = selectedTab,
+                    selectedRegisterTab = selectedRegisterTab,
+                    selectedFinderTab = selectedFinderTab,
+                    nestedPageOpen = providerNestedPageOpen
+                )
+                val primaryNavigationBottomPadding = if (showPrimaryNavigation) {
+                    64.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                } else {
+                    0.dp
+                }
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = primaryNavigationBottomPadding)
+                    ) {
                 when (activeScreen) {
                     "booking_loader" -> {
                         BookingLoaderScreen(
@@ -751,13 +909,15 @@ class MainActivity : ComponentActivity() {
                                     currentLat = lat
                                     currentLon = lon
                                 }
-                                if (mapPickerSource == "register_choice") {
+                                 if (mapPickerSource == "register_choice" || mapPickerSource == "listings") {
                                      pendingMapLocationToSend = if (lat != null && lon != null) {
                                          "$loc||$lat,$lon"
                                      } else {
                                          loc
                                      }
-                                     activeScreen = "register_choice"
+                                     activeScreen = if (mapPickerSource == "listings") "listings" else "register_choice"
+                                 } else if (mapPickerSource == "dashboard") {
+                                     activeScreen = "dashboard"
                                  } else if (mapPickerSource == "booking_create") {
                                      pendingBookingAddress = loc
                                      pendingBookingLat = lat
@@ -770,10 +930,129 @@ class MainActivity : ComponentActivity() {
                              onBack = {
                                  if (mapPickerSource == "register_choice") {
                                      activeScreen = "register_choice"
+                                 } else if (mapPickerSource == "listings") {
+                                     activeScreen = "listings"
+                                 } else if (mapPickerSource == "dashboard") {
+                                     activeScreen = "dashboard"
                                  } else {
                                      activeScreen = "main"
                                  }
                              }
+                        )
+                    }
+                    "dashboard" -> {
+                        val dashboardHeroHeight = standardTopHeroHeight()
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFFF6F8F7))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(dashboardHeroHeight)
+                            ) {
+                                HeroCarousel(
+                                    theme = "dashboard",
+                                    canvasColor = Color.Transparent,
+                                    carouselHeight = dashboardHeroHeight,
+                                    horizontalPadding = 0.dp,
+                                    verticalPadding = 0.dp,
+                                    cornerRadius = 0.dp,
+                                    managedBanners = appMedia,
+                                    onResolveMedia = { fileId -> repository.getLocalPhotoPath(fileId, context) }
+                                )
+                                OnboardingTopBar(
+                                    currentLocation = userLocation,
+                                    onSelectLocationClick = { mapPickerSource = "dashboard"; activeScreen = "map_picker" },
+                                    onProfileClick = { selectedTab = 3; activeScreen = "main" },
+                                    userPhotoPath = userPhotoPath,
+                                    isProviderMode = isProviderMode,
+                                    onModeToggle = onModeToggle,
+                                    tabsList = activeTabsList,
+                                    selectedTabId = selectedTabId,
+                                    onTabSelected = onTabSelected,
+                                    modifier = Modifier.align(Alignment.TopCenter),
+                                    transparentBackground = true,
+                                    currentTheme = todayTheme
+                                )
+                            }
+
+                            ProviderDashboardContent(
+                                summary = providerDashboardSummary,
+                                isLoading = isProviderDashboardLoading,
+                                loadFailed = providerDashboardLoadFailed,
+                                onRetry = { providerDashboardRefreshVersion++ },
+                                onOpenBookings = {
+                                    selectedTab = 2
+                                    activeScreen = "main"
+                                },
+                                onOpenListings = {
+                                    providerListingsInitialSection = "listings"
+                                    activeScreen = "listings"
+                                },
+                                onOpenAvailability = {
+                                    providerListingsInitialSection = "availability"
+                                    activeScreen = "listings"
+                                },
+                                onOpenPackages = {
+                                    providerListingsInitialSection = "packages"
+                                    activeScreen = "listings"
+                                },
+                                onRegisterService = {
+                                    selectedRegisterTab = 0
+                                    activeScreen = "register_choice"
+                                },
+                                onOpenWallet = {
+                                    nestoraMoneyReturnScreen = "dashboard"
+                                    activeScreen = "nestora_money"
+                                },
+                                onOpenAccount = {
+                                    selectedTab = 3
+                                    activeScreen = "main"
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                    "listings" -> {
+                        ProviderListingsScreen(
+                            onFetchMyListings = { repository.getMyListings() },
+                            onSetListingActive = { listingId, active ->
+                                repository.setListingActive(listingId, active)
+                            },
+                            onSetCustomProviderAvailability = { listingId, daysCsv, startTime, endTime ->
+                                repository.setCustomProviderAvailability(listingId, daysCsv, startTime, endTime)
+                            },
+                            onUpdateListing = { listingId, title, description, price, location, city, lat, lon ->
+                                repository.updateListing(listingId, title, description, price, location, city, lat, lon)
+                            },
+                            onSaveListingEditor = { update -> repository.saveListingEditor(update) },
+                            onFetchProviderServiceCatalog = { listingId -> repository.getProviderServiceCatalogResponse(listingId) },
+                            onSaveProviderServiceOffering = { listingId, payload -> repository.saveProviderServiceOffering(listingId, payload) },
+                            onSaveProviderServicePackage = { listingId, payload -> repository.saveProviderServicePackage(listingId, payload) },
+                            onFetchMediaAssets = { mediaScope, targetId -> repository.getMediaAssets(mediaScope, targetId, manage = true) },
+                            onUploadManagedMedia = { uri, mediaScope, targetId, role -> repository.uploadManagedMedia(uri, context, mediaScope, targetId, role) },
+                            onArchiveMediaAsset = { assetId -> repository.archiveMediaAsset(assetId) },
+                            onResolveMedia = { fileId -> repository.getLocalPhotoPath(fileId, context) },
+                            categories = categories,
+                            onFetchAllServiceTypes = { repository.getAllServiceTypes() },
+                            onFetchServiceAttributes = { serviceTypeSlug -> repository.getServiceAttributes(serviceTypeSlug) },
+                            onSelectLocationClick = { mapPickerSource = "listings"; activeScreen = "map_picker" },
+                            pendingMapLocationToSend = pendingMapLocationToSend,
+                            onClearPendingMapLocation = { pendingMapLocationToSend = null },
+                            onBack = { activeScreen = "dashboard" },
+                            tabsList = activeTabsList,
+                            selectedTabId = selectedTabId,
+                            onTabSelected = onTabSelected,
+                            isProviderMode = isProviderMode,
+                            onModeToggle = onModeToggle,
+                            currentTheme = todayTheme,
+                            currentLocation = userLocation ?: "",
+                            onProfileClick = { selectedTab = 3; activeScreen = "main" },
+                            showHomeChrome = false,
+                            initialSection = providerListingsInitialSection,
+                            onNestedPageChanged = { providerNestedPageOpen = it }
                         )
                     }
                     "register_choice" -> {
@@ -784,7 +1063,7 @@ class MainActivity : ComponentActivity() {
                             onFetchServiceTypes = { categorySlug -> repository.getServiceTypes(categorySlug) },
                             onFetchAllServiceTypes = { repository.getAllServiceTypes() },
                             onFetchServiceAttributes = { serviceTypeSlug -> repository.getServiceAttributes(serviceTypeSlug) },
-                            onSubmit = { categorySlug, serviceTypeSlug, basePrice, location, city, description, collectedAttributes ->
+                            onSubmit = { categorySlug, serviceTypeSlug, basePrice, location, city, latitude, longitude, serviceName, description, collectedAttributes ->
                                 repository.registerService(
                                     NestoraRepository.RegisterServiceRequest(
                                         categorySlug = categorySlug,
@@ -792,6 +1071,9 @@ class MainActivity : ComponentActivity() {
                                         basePrice = basePrice,
                                         locationDisplayName = location,
                                         city = city,
+                                        latitude = latitude,
+                                        longitude = longitude,
+                                        serviceName = serviceName,
                                         description = description,
                                         collectedAttributes = collectedAttributes
                                     )
@@ -801,7 +1083,7 @@ class MainActivity : ComponentActivity() {
                             onSave = { repository.aisoSave() },
                             onUpdate = { payload -> repository.aisoUpdate(payload) },
                             onReset = { repository.aisoReset() },
-                            onBack = { activeScreen = "main" },
+                            onBack = { activeScreen = "dashboard" },
                             currentLocation = userLocation,
                             onSelectLocationClick = { mapPickerSource = "register_choice"; activeScreen = "map_picker" },
                             onProfileClick = { selectedTab = 3; activeScreen = "main" },
@@ -829,12 +1111,21 @@ class MainActivity : ComponentActivity() {
                                 repository.updateListing(listingId, title, description, price, location, city, lat, lon)
                             },
                             onSaveListingEditor = { update -> repository.saveListingEditor(update) },
+                            onFetchProviderServiceCatalog = { listingId -> repository.getProviderServiceCatalogResponse(listingId) },
+                            onSaveProviderServiceOffering = { listingId, payload -> repository.saveProviderServiceOffering(listingId, payload) },
+                            onSaveProviderServicePackage = { listingId, payload -> repository.saveProviderServicePackage(listingId, payload) },
+                            onFetchMediaAssets = { mediaScope, targetId -> repository.getMediaAssets(mediaScope, targetId, manage = true) },
+                            onUploadManagedMedia = { uri, mediaScope, targetId, role -> repository.uploadManagedMedia(uri, context, mediaScope, targetId, role) },
+                            onArchiveMediaAsset = { assetId -> repository.archiveMediaAsset(assetId) },
+                            onResolveMedia = { fileId -> repository.getLocalPhotoPath(fileId, context) },
                             isProviderMode = isProviderMode,
                             onModeToggle = onModeToggle,
                             tabsList = activeTabsList,
                             selectedTabId = selectedTabId,
                             onTabSelected = onTabSelected,
                             currentTheme = todayTheme,
+                            showHomeChrome = false,
+                            onNestedPageChanged = { providerNestedPageOpen = it },
                             onClearAutoRegisterChat = {
                                  scope.launch {
                                      repository.aisoReset()
@@ -852,6 +1143,43 @@ class MainActivity : ComponentActivity() {
                              }
                         )
                     }
+                    "service_catalog", "customer_cart" -> {
+                        val targetListing = serviceCatalogListing ?: customerCart?.listing
+                        if (targetListing != null) {
+                            CustomerServiceCatalogScreen(
+                                listing = targetListing,
+                                currentCart = customerCart,
+                                cartOnly = showCartOnly || activeScreen == "customer_cart",
+                                onBack = {
+                                    if (activeScreen == "customer_cart") {
+                                        activeScreen = "service_catalog"
+                                        serviceCatalogListing = targetListing
+                                        showCartOnly = false
+                                    } else {
+                                        activeScreen = "main"
+                                        serviceCatalogListing = null
+                                        showCartOnly = false
+                                    }
+                                },
+                                onFetchCatalog = { listingId -> repository.getListingServiceCatalogResponse(listingId) },
+                                onResolveMedia = { fileId -> repository.getLocalPhotoPath(fileId, context) },
+                                onCartChanged = updateCustomerCart,
+                                onOpenCart = {
+                                    serviceCatalogListing = customerCart?.listing ?: targetListing
+                                    showCartOnly = true
+                                    activeScreen = "customer_cart"
+                                },
+                                onCheckout = { cart ->
+                                    updateCustomerCart(cart)
+                                    bookingSheetListing = cart.listing
+                                }
+                            )
+                        } else {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Your cart is empty.", color = Color(0xFF60756B))
+                            }
+                        }
+                    }
                     "booking_detail" -> {
                         BookingDetailScreen(
                             detail = bookingDetail,
@@ -859,7 +1187,12 @@ class MainActivity : ComponentActivity() {
                             onBack = {
                                 bookingPolling.closeDetail()
                                 selectedBookingId = null
-                                activeScreen = "main"
+                                if (bookingDetailReturnToCustomerBookings) {
+                                    bookingDetailReturnToCustomerBookings = false
+                                    activeScreen = "customer_bookings"
+                                } else {
+                                    activeScreen = "main"
+                                }
                             },
                             onAccept = {
                                 scope.launch {
@@ -882,11 +1215,15 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             },
-                            onStartTravel = { lat, lon ->
+                            onStartTravel = { lat, lon, onError ->
                                 scope.launch {
                                     selectedBookingId?.let { id ->
-                                        if (repository.startTravel(id, lat, lon)) {
+                                        val resp = repository.startTravel(id, lat, lon)
+                                        if (resp?.ok == true) {
                                             bookingPolling.openDetail(id, clearCache = false)
+                                            onError(null)
+                                        } else {
+                                            onError(resp?.reply ?: "Could not start travel")
                                         }
                                     }
                                 }
@@ -994,37 +1331,66 @@ class MainActivity : ComponentActivity() {
                             onBack = { activeScreen = "main"; selectedTab = 3 }
                         )
                     }
-                    else -> {
-                        Scaffold(
-                            bottomBar = {
-                                if (selectedTab != 1 && selectedTab != 2 && selectedTab != 3) {
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = Color.White,
-                                        shadowElevation = 8.dp,
-                                        border = BorderStroke(0.8.dp, Color(0xFFE2EAF2))
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .navigationBarsPadding()
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(52.dp),
-                                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                CustomNavItem(0, "Explore", selectedTab == 0) { selectedTab = 0 }
-                                                CustomNavItem(4, "Categories", selectedTab == 4) { selectedTab = 4 }
-                                                CustomNavItem(5, "Services", selectedTab == 5) { selectedTab = 5 }
-                                            }
-                                        }
-                                    }
-                                }
+                    "admin_media" -> {
+                        AdminMediaScreen(
+                            categories = categories,
+                            loadServiceTypes = { repository.getAllServiceTypes() },
+                            onBack = {
+                                activeScreen = "main"
+                                scope.launch { appMedia = repository.getAppMedia()?.mediaAssets.orEmpty() }
+                            },
+                            loadAssets = { mediaScope, targetId -> repository.getMediaAssets(mediaScope, targetId, manage = true) },
+                            upload = { uri, mediaScope, targetId, role, title, subtitle, actionLabel, actionValue, order ->
+                                repository.uploadManagedMedia(uri, context, mediaScope, targetId, role, title, subtitle, actionLabel, actionValue, order)
+                            },
+                            archive = { assetId -> repository.archiveMediaAsset(assetId) },
+                            resolveMedia = { fileId -> repository.getLocalPhotoPath(fileId, context) }
+                        )
+                    }
+                    "nestora_money" -> {
+                        NestoraMoneyScreen(
+                            onBack = {
+                                activeScreen = nestoraMoneyReturnScreen
+                                if (nestoraMoneyReturnScreen == "main") selectedTab = 3
+                                nestoraMoneyReturnScreen = "main"
+                            },
+                            onAddBalanceClick = { activeScreen = "add_balance" },
+                            getWalletBalance = { repository.getWalletBalance() }
+                        )
+                    }
+                    "add_balance" -> {
+                        AddBalanceScreen(
+                            onBack = { activeScreen = "nestora_money" },
+                            onBalanceAdded = { activeScreen = "nestora_money" },
+                            getWalletBalance = { repository.getWalletBalance() },
+                            addWalletBalance = { amount -> repository.addWalletBalance(amount) }
+                        )
+                    }
+                    "customer_bookings" -> {
+                        CustomerBookingsScreen(
+                            bookings = bookings,
+                            customerUserId = profile?.id,
+                            onBack = {
+                                activeScreen = "main"
+                                selectedTab = 3
+                            },
+                            onExploreServices = {
+                                activeScreen = "main"
+                                selectedTab = 0
+                            },
+                            onBookingClick = { booking ->
+                                bookingDetailReturnToCustomerBookings = true
+                                selectedBookingId = booking.id
+                                bookingPolling.openDetail(booking.id)
+                                activeScreen = "booking_detail"
+                            },
+                            onHelpClick = {
+                                Toast.makeText(context, "Support is here to help with your booking.", Toast.LENGTH_LONG).show()
                             }
-                        ) { innerPadding ->
+                        )
+                    }
+                    else -> {
+                        Scaffold { innerPadding ->
                              Box(
                                  modifier = Modifier.padding(
                                      bottom = innerPadding.calculateBottomPadding()
@@ -1034,12 +1400,14 @@ class MainActivity : ComponentActivity() {
                                     0 -> HomeScreen(
                                         categories = categories,
                                         listings = feedListings,
-                                        onListingClick = { listing -> bookingSheetListing = listing },
+                                        onListingClick = openProviderServices,
                                         onSearchClick = { selectedTab = 1; selectedFinderTab = 1 },
                                         onCategorySelected = { cat ->
                                             selectedTab = 1
                                             selectedFinderTab = 1
-                                            runChatQuery("${cat.emoji} ${cat.name}") { repository.searchByCategory(cat.id) }
+                                            runChatQuery("${cat.emoji} ${cat.name}") {
+                                                repository.searchByCategory(cat.id, addressBarLatitude, addressBarLongitude)
+                                            }
                                         },
                                         onSeeAllCategoriesClick = { selectedTab = 4 },
                                         currentLocation = userLocation,
@@ -1050,12 +1418,14 @@ class MainActivity : ComponentActivity() {
                                         onExploreClick = { selectedTab = 0 },
                                         onScrollChanged = { isScrolled = it },
                                         userPhotoPath = userPhotoPath,
-                                        onBookViaTelegram = { listing -> bookingSheetListing = listing },
+                                        onBookViaTelegram = startBooking,
                                          isProviderMode = isProviderMode,
                                          onModeToggle = onModeToggle,
                                          tabsList = activeTabsList,
                                         selectedTabId = selectedTabId,
                                         onTabSelected = onTabSelected,
+                                        cartItemCount = customerCart?.itemCount ?: 0,
+                                        onCartClick = openCustomerCart,
                                         currentTheme = todayTheme,
                                         isLoadingFeed = isLoadingFeed,
                                         onRefreshFeed = {
@@ -1065,13 +1435,16 @@ class MainActivity : ComponentActivity() {
                                                 try {
                                                     feedListings = repository.getFeedListings(
                                                         addressBarLatitude = addressBarLatitude,
-                                                        addressBarLongitude = addressBarLongitude
+                                                        addressBarLongitude = addressBarLongitude,
+                                                        forceRefresh = true
                                                     )?.listings?.map { it.toServiceListing() } ?: emptyList()
                                                 } finally {
                                                     isLoadingFeed = false
                                                 }
                                             }
-                                        }
+                                        },
+                                        managedBanners = appMedia,
+                                        onResolveMedia = { fileId -> repository.getLocalPhotoPath(fileId, context) }
                                     )
 
                                     4 -> CategoriesScreen(
@@ -1082,10 +1455,14 @@ class MainActivity : ComponentActivity() {
                                         onServiceTypeClick = { svcType ->
                                             selectedTab = 1
                                             selectedFinderTab = 1
-                                            runChatQuery(svcType.name) { repository.searchByServiceType(svcType.slug) }
+                                            runChatQuery(svcType.name) {
+                                                repository.searchByServiceType(svcType.slug, addressBarLatitude, addressBarLongitude)
+                                            }
                                         },
                                         onSearchClick = { selectedTab = 1; selectedFinderTab = 1 },
-                                        onBack = { selectedTab = 0 }
+                                        onBack = { selectedTab = 0 },
+                                        managedMedia = appMedia,
+                                        onResolveMedia = { fileId -> repository.getLocalPhotoPath(fileId, context) }
                                     )
 
                                     5 -> ServicesScreen(
@@ -1096,10 +1473,14 @@ class MainActivity : ComponentActivity() {
                                         onServiceTypeClick = { svcType ->
                                             selectedTab = 1
                                             selectedFinderTab = 1
-                                            runChatQuery(svcType.name) { repository.searchByServiceType(svcType.slug) }
+                                            runChatQuery(svcType.name) {
+                                                repository.searchByServiceType(svcType.slug, addressBarLatitude, addressBarLongitude)
+                                            }
                                         },
                                         onSearchClick = { selectedTab = 1; selectedFinderTab = 1 },
-                                        onBack = { selectedTab = 0 }
+                                        onBack = { selectedTab = 0 },
+                                        managedMedia = appMedia,
+                                        onResolveMedia = { fileId -> repository.getLocalPhotoPath(fileId, context) }
                                     )
 
                                     1 -> FinderChoiceScreen(
@@ -1109,7 +1490,9 @@ class MainActivity : ComponentActivity() {
                                          chatMessages = chatMessages,
                                          userName = profile?.name,
                                          onSendMessage = { userText: String ->
-                                             runChatQuery(userText) { repository.chat(userText) }
+                                             runChatQuery(userText) {
+                                                 repository.chat(userText, addressBarLatitude, addressBarLongitude)
+                                             }
                                          },
                                          onClearChat = {
                                              chatMessages.clear()
@@ -1123,7 +1506,7 @@ class MainActivity : ComponentActivity() {
                                                  )
                                              )
                                          },
-                                         onBookListing = { listing -> bookingSheetListing = listing },
+                                         onBookListing = startBooking,
                                          userPhotoPath = userPhotoPath,
                                          onExploreClick = { selectedTab = 0 },
                                          onSelectLocationClick = { activeScreen = "map_picker" },
@@ -1134,9 +1517,11 @@ class MainActivity : ComponentActivity() {
                                           isProviderMode = isProviderMode,
                                           onModeToggle = onModeToggle,
                                           tabsList = activeTabsList,
-                                          selectedTabId = selectedTabId,
-                                          onTabSelected = onTabSelected,
-                                          currentTheme = todayTheme,
+                                           selectedTabId = selectedTabId,
+                                           onTabSelected = onTabSelected,
+                                           cartItemCount = customerCart?.itemCount ?: 0,
+                                           onCartClick = openCustomerCart,
+                                           currentTheme = todayTheme,
                                           listings = feedListings,
                                           isLoadingFeed = isLoadingFeed,
                                           onRefreshFeed = {
@@ -1146,22 +1531,28 @@ class MainActivity : ComponentActivity() {
                                                   try {
                                                       feedListings = repository.getFeedListings(
                                                           addressBarLatitude = addressBarLatitude,
-                                                          addressBarLongitude = addressBarLongitude
+                                                          addressBarLongitude = addressBarLongitude,
+                                                          forceRefresh = true
                                                       )?.listings?.map { it.toServiceListing() } ?: emptyList()
                                                   } finally {
                                                       isLoadingFeed = false
                                                   }
                                               }
                                           },
-                                          onListingClick = { listing -> bookingSheetListing = listing },
+                                          onListingClick = openProviderServices,
                                           onFetchLocationListings = { location ->
                                               repository.chat(
-                                                  query = "find service providers in $location"
+                                                  query = "find service providers in $location",
+                                                  addressBarLatitude = addressBarLatitude,
+                                                  addressBarLongitude = addressBarLongitude
                                               )?.listings.orEmpty().map { it.toServiceListing() }
-                                          }
+                                          },
+                                          managedBanners = appMedia,
+                                          onResolveMedia = { fileId -> repository.getLocalPhotoPath(fileId, context) }
                                      )
 
-                                    2 -> BookingsScreen(
+                                    2 -> {
+                                        BookingsScreen(
                                         bookings = bookings,
                                         viewerUserId = profile?.id,
                                         hasProviderListings = profile?.hasProviderListings == true,
@@ -1189,14 +1580,16 @@ class MainActivity : ComponentActivity() {
                                         onExploreClick = { selectedTab = 0 },
                                         onScrollChanged = { isScrolled = it },
                                         userPhotoPath = userPhotoPath,
-                                        onRebookClick = { listing -> bookingSheetListing = listing },
+                                        onRebookClick = startBooking,
                                          isProviderMode = isProviderMode,
                                          onModeToggle = onModeToggle,
                                          tabsList = activeTabsList,
                                          selectedTabId = selectedTabId,
                                          onTabSelected = onTabSelected,
-                                         currentTheme = todayTheme
-                                    )
+                                         currentTheme = todayTheme,
+                                         showHomeChrome = !isProviderMode
+                                        )
+                                    }
 
                                     3 -> {
                                         val p = profile
@@ -1205,6 +1598,7 @@ class MainActivity : ComponentActivity() {
                                                 profile = p,
                                                 onLogout = {
                                                      prefs.edit().putBoolean("guest_mode", false).apply()
+                                                     updateCustomerCart(null)
                                                      guestMode = false
                                                      profile = null
                                                      bookingPolling.clear()
@@ -1230,8 +1624,20 @@ class MainActivity : ComponentActivity() {
                                                 },
                                                 onSearchAddress = { q, lat, lon -> repository.searchAddress(q, lat, lon) },
                                                 onReverseGeocode = { lat, lon -> repository.reverseGeocode(lat, lon) },
-                                                onAdminPayments = { activeScreen = "admin_payments" }
-                                            )
+                                                onAdminPayments = { activeScreen = "admin_payments" },
+                                                onAdminMedia = { activeScreen = "admin_media" },
+                                                onNestoraMoneyClick = {
+                                                    nestoraMoneyReturnScreen = "main"
+                                                    activeScreen = "nestora_money"
+                                                 },
+                                                 isProviderMode = isProviderMode,
+                                                 onMyBookings = { activeScreen = "customer_bookings" },
+                                                 currentLanguage = currentLanguage,
+                                                 onLanguageChange = { lang ->
+                                                     currentLanguage = lang
+                                                     prefs.edit().putString("app_language", lang.code).apply()
+                                                 }
+                                             )
                                         } else {
                                             GuestProfileScreen(
                                                 onLoginClick = { 
@@ -1256,6 +1662,48 @@ class MainActivity : ComponentActivity() {
                 // status). Needs bookingPolling's list StateFlow to actually
                 // be populated outside the Bookings tab — see the auth-ready
                 // startListPolling() call above.
+                    }
+
+                    if (showPrimaryNavigation) {
+                        NestoraPrimaryNavigationBar(
+                            isProviderMode = isProviderMode,
+                            selectedDestination = primaryDestination,
+                            onDestinationSelected = { destination ->
+                                when (destination) {
+                                    NestoraPrimaryDestination.Dashboard -> activeScreen = "dashboard"
+                                    NestoraPrimaryDestination.Register -> {
+                                        selectedRegisterTab = 0
+                                        activeScreen = "register_choice"
+                                    }
+                                    NestoraPrimaryDestination.Listings -> {
+                                        providerListingsInitialSection = "listings"
+                                        activeScreen = "listings"
+                                    }
+                                    NestoraPrimaryDestination.Bookings -> {
+                                        selectedTab = 2
+                                        activeScreen = "main"
+                                    }
+                                    NestoraPrimaryDestination.Explore -> {
+                                        selectedTab = 0
+                                        activeScreen = "main"
+                                    }
+                                    NestoraPrimaryDestination.Finder -> {
+                                        selectedTab = 1
+                                        selectedFinderTab = 0
+                                        activeScreen = "main"
+                                    }
+                                    NestoraPrimaryDestination.Account -> {
+                                        selectedTab = 3
+                                        activeScreen = "main"
+                                    }
+                                }
+                            },
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                        )
+                    }
+
+                }
+
                 if (activeScreen == "main" && selectedTab in listOf(0, 4, 5)) {
                     val activeBookings = bookings.filter {
                         it.stage.uppercase() !in listOf("DONE", "ENDED") &&
@@ -1495,6 +1943,9 @@ class MainActivity : ComponentActivity() {
                 bookingSheetListing?.let { listing ->
                     AdaptiveBookingSheet(
                         listing = listing,
+                        initialPackageId = customerCart?.takeIf { it.listing.id == listing.id }?.packageId,
+                        initialOfferingQuantities = customerCart?.takeIf { it.listing.id == listing.id }?.offeringQuantities.orEmpty(),
+                        initialUseListingPrice = customerCart?.takeIf { it.listing.id == listing.id }?.useListingPrice == true,
                         initialLocationText = pendingBookingAddress ?: userLocation ?: "Salt Lake, Sector V",
                         initialLat = pendingBookingLat ?: currentLat,
                         initialLon = pendingBookingLon ?: currentLon,
@@ -1510,6 +1961,8 @@ class MainActivity : ComponentActivity() {
                         },
                         onFetchPolicy = { listingId -> repository.getBookingPolicyResponse(listingId) },
                         onFetchAvailability = { listingId -> repository.getListingAvailabilityResponse(listingId) },
+						onFetchServiceCatalog = { listingId -> repository.getListingServiceCatalogResponse(listingId) },
+						onFetchDraftAvailability = { draftId -> repository.getEngagementDraftAvailabilityResponse(draftId) },
                         onCreateDraft = { listingId, idempotencyKey ->
                             repository.createEngagementDraft(listingId, idempotencyKey)
                         },
@@ -1522,6 +1975,7 @@ class MainActivity : ComponentActivity() {
                         onSetTimePreference = { draftId, term, preference ->
                             repository.setEngagementDraftTimePreference(draftId, term, preference)
                         },
+						onSetServiceSelection = { draftId, selection -> repository.setEngagementDraftServiceSelection(draftId, selection) },
                         onSetNote = { draftId, note -> repository.setEngagementDraftNote(draftId, note) },
                         onSetAnswer = { draftId, key, value ->
                             repository.setEngagementDraftAnswer(draftId, key, value)
@@ -1531,16 +1985,20 @@ class MainActivity : ComponentActivity() {
                             loaderListingTitle = listing.title
                             loaderAddressText = if (userLocation?.isNotBlank() == true) userLocation ?: "" else "Center Appointment"
                             bookingSheetListing = null
+                            updateCustomerCart(null)
+                            serviceCatalogListing = null
+                            showCartOnly = false
                             selectedBookingId = bookingId
                             bookingPolling.openDetail(bookingId)
                             activeScreen = "booking_detail"
                         }
                     )
                 }
-                }
-            }
+        }
+        } // end CompositionLocalProvider(LocalNestoraStrings)
         }
     }
+}
 }
 
 @Composable

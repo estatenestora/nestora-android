@@ -418,62 +418,17 @@ fun AutoRegisterScreen(
 
     fun confirmAndSave() {
         if (isBusy) return
-        
-        val priceVal = editablePrice.trim()
-        val dPrice = priceVal.toDoubleOrNull()
-        if (dPrice == null || dPrice <= 0.0) {
-            activeErrorAlert = "Base Price must be a valid positive number."
-            return
-        }
-        
+
         if (editableLocation.trim().isEmpty()) {
             activeErrorAlert = "Location cannot be empty."
             return
         }
-        
-        if (editableDescription.trim().isEmpty()) {
-            activeErrorAlert = "Service Description cannot be empty."
-            return
-        }
-        
-        parseAisoAttributes(summary).forEach { field ->
-            val valEntered = editableAttributes[field.key]?.trim() ?: ""
 
-            if (field.isRequired && valEntered.isEmpty()) {
-                activeErrorAlert = "Field '${field.displayLabel}' is required."
-                return
-            }
-
-            if (valEntered.isNotEmpty() && field.options.isNotEmpty()) {
-                if (field.inputType == "select" || field.inputType == "boolean") {
-                    val isValidOpt = field.options.any { it.equals(valEntered, ignoreCase = true) }
-                    if (!isValidOpt) {
-                        activeErrorAlert = "Field '${field.displayLabel}' must be one of the valid options: ${field.options.joinToString(", ")}."
-                        return
-                    }
-                } else if (field.inputType == "multiselect") {
-                    val parts = valEntered.split(",").map { it.trim() }
-                    for (part in parts) {
-                        val isValidOpt = field.options.any { it.equals(part, ignoreCase = true) }
-                        if (!isValidOpt) {
-                            activeErrorAlert = "Field '${field.displayLabel}' contains an invalid option '$part'. Valid options are: ${field.options.joinToString(", ")}."
-                            return
-                        }
-                    }
-                }
-            }
-        }
-        
         isBusy = true
         scope.launch {
             try {
                 val builder = StringBuilder()
-                builder.append("base_price=").append(dPrice)
-                builder.append("||location_display_name=").append(editableLocation.trim())
-                builder.append("||description=").append(editableDescription.trim())
-                for ((k, v) in editableAttributes) {
-                    builder.append("||attributes:").append(k).append("=").append(v.trim())
-                }
+                builder.append("location_display_name=").append(editableLocation.trim())
 
                 onUpdate(builder.toString())
                 val response = onSave()
@@ -753,48 +708,47 @@ fun AutoRegisterScreen(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF004D40)) // Deep teal header background
-                    .statusBarsPadding()
-                    .padding(vertical = 8.dp, horizontal = 8.dp)
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.align(Alignment.CenterStart)
-                ) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-                }
-
-                Text(
-                    text = "Nestora AI",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier.align(Alignment.Center)
-                )
-
-                val isRegistrationStarted = messages.size > 1
-                IconButton(
-                    onClick = {
-                        if (isRegistrationStarted) {
-                            onClearChat()
-                            selectedServiceType = null
-                            isRejected = false
-                            isDone = false
-                            readyToConfirm = false
-                            summary = null
+            Surface(modifier = Modifier.fillMaxWidth(), color = Color.White, shadowElevation = 2.dp) {
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(start = 6.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color(0xFF10231B))
                         }
-                    },
-                    enabled = isRegistrationStarted,
-                    modifier = Modifier.align(Alignment.CenterEnd)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Clear Chat",
-                        tint = if (isRegistrationStarted) Color.White else Color.White.copy(alpha = 0.4f)
-                    )
+                        Text(
+                            text = "Register with Nestora AI",
+                            modifier = Modifier.weight(1f),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF10231B)
+                        )
+                val isRegistrationStarted = messages.size > 1
+                        IconButton(
+                            onClick = {
+                                if (isRegistrationStarted) {
+                                    onClearChat()
+                                    selectedServiceType = null
+                                    isRejected = false
+                                    isDone = false
+                                    readyToConfirm = false
+                                    summary = null
+                                }
+                            },
+                            enabled = isRegistrationStarted
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Clear registration chat",
+                                tint = if (isRegistrationStarted) Color(0xFF075D45) else Color(0xFFB7C1BC)
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = Color(0xFFE8ECEA), thickness = 1.dp)
                 }
             }
 
@@ -943,24 +897,6 @@ fun AutoRegisterScreen(
                                     Spacer(Modifier.height(12.dp))
                                 }
  
-                                Text("Base Price (in ₹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF004D40))
-                                Spacer(Modifier.height(4.dp))
-                                OutlinedTextField(
-                                    value = editablePrice,
-                                    onValueChange = { editablePrice = it },
-                                    placeholder = { Text("e.g. 500", color = Color.Gray) },
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color(0xFF004D40),
-                                        unfocusedBorderColor = Color.LightGray,
-                                        focusedTextColor = Color(0xFF2C2C2C),
-                                        unfocusedTextColor = Color(0xFF2C2C2C)
-                                    ),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(Modifier.height(12.dp))
- 
                                 Text("Location Area/City", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF004D40))
                                 Spacer(Modifier.height(4.dp))
                                 Row(
@@ -1000,6 +936,9 @@ fun AutoRegisterScreen(
                                 }
                                 Spacer(Modifier.height(12.dp))
  
+                                // Legacy summaries may contain listing fields. Current registration
+                                // deliberately omits them because items and packages own this data.
+                                if (parseAisoAttributes(summary).isNotEmpty()) {
                                 Text("Service Description", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF004D40))
                                 Spacer(Modifier.height(4.dp))
                                 OutlinedTextField(
@@ -1116,6 +1055,7 @@ fun AutoRegisterScreen(
                                         )
                                     }
                                 }
+                                }
                                 Spacer(Modifier.height(16.dp))
  
                                 Button(
@@ -1177,7 +1117,7 @@ fun AutoRegisterScreen(
                     }
                 } else {
                     Column(modifier = Modifier.fillMaxWidth().background(Color.White)) {
-                        HorizontalDivider(color = Color(0xFFE2EAF2), thickness = 1.dp)
+                        HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,

@@ -11,18 +11,31 @@ import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import org.drinkless.tdlib.TdApi
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.zip.CRC32
 import java.util.zip.GZIPInputStream
+
+internal fun providerCatalogWriteChunks(encoded: String, payloadSize: Int): List<String>? {
+    if (encoded.isEmpty() || payloadSize !in 1..10_000) return null
+    return encoded.chunked(100).takeIf { it.size in 1..128 }
+}
 
 /**
  * NestoraRepository — Inline Query Telegram Bridge:
@@ -54,6 +67,8 @@ class NestoraRepository {
     private val discoveryRequestMutex = Mutex()
     private val discoveryCache = mutableMapOf<String, CachedDiscoveryResponse>()
     private val discoveryFailures = mutableMapOf<String, DiscoveryFailure>()
+    private val _slowWriteNotices = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val slowWriteNotices: SharedFlow<String> = _slowWriteNotices.asSharedFlow()
 
     private data class CachedDiscoveryResponse(
         val response: AndroidBridgeResponse,
@@ -85,6 +100,7 @@ class NestoraRepository {
         // query that's too long fails predictably (null + a clear log) instead
         // of being silently mangled by Telegram.
         private const val MAX_INLINE_QUERY_LEN = 256
+        private const val DOCUMENT_CHANNEL_TIMEOUT_MS = 20_000L
     }
 
     // Dedicated scope for the manual calibration probe. It is intentionally
@@ -245,7 +261,7 @@ class NestoraRepository {
 
         Log.i("NestoraRepo", "[Inline] Downloading document-channel payload (fileId=${fileRef.id}, expectedLen=$expectedLen, mode=$mode)")
         val downloaded = try {
-            TdLibManager.downloadFile(fileRef)
+            withTimeout(DOCUMENT_CHANNEL_TIMEOUT_MS) { TdLibManager.downloadFile(fileRef) }
         } catch (e: Throwable) {
             Log.e("NestoraRepo", "[Inline] Document download failed", e)
             return null
@@ -457,8 +473,31 @@ class NestoraRepository {
 
             Log.d("NestoraRepo", "[Inline] Sending: requestId=$requestId query=$query")
 
+            val isWrite = !isBackground && !BridgeRequestPolicy.isReadOnly(query)
             val results = try {
-                TdLibManager.sendInlineQuery(inlineQuery, isBackground)
+                if (isWrite) {
+                    // Do not cancel the dispatched TDLib request after eight
+                    // seconds: the server may already be committing it. Tell
+                    // the user that confirmation is still in progress, then
+                    // keep the same request alive until its write deadline.
+                    coroutineScope {
+                        val pendingResults = async {
+                            TdLibManager.sendInlineQuery(
+                                inlineQuery,
+                                timeoutMillis = BridgeRequestPolicy.WRITE_TIMEOUT_MS
+                            )
+                        }
+                        withTimeoutOrNull(BridgeRequestPolicy.READ_TIMEOUT_MS) { pendingResults.await() }
+                            ?: run {
+                                _slowWriteNotices.tryEmit(
+                                    "Nestora is still confirming your request. Do not submit it again."
+                                )
+                                pendingResults.await()
+                            }
+                    }
+                } else {
+                    TdLibManager.sendInlineQuery(inlineQuery, isBackground, BridgeRequestPolicy.READ_TIMEOUT_MS)
+                }
             } catch (e: Throwable) {
                 Log.e("NestoraRepo", "[Inline] sendInlineQuery error", e)
                 return null
@@ -487,7 +526,7 @@ class NestoraRepository {
     // CHAT — service search
     // =========================================================================
 
-    private fun withAddressBarCoordinates(payload: String, addressBarLatitude: Double?, addressBarLongitude: Double?): String {
+    internal fun withAddressBarCoordinates(payload: String, addressBarLatitude: Double?, addressBarLongitude: Double?): String {
         return if (
             addressBarLatitude != null && addressBarLongitude != null &&
             addressBarLatitude in -90.0..90.0 && addressBarLongitude in -180.0..180.0
@@ -510,11 +549,17 @@ class NestoraRepository {
      */
     private suspend fun loadDiscovery(
         query: String,
-        ttlMs: Long
+        ttlMs: Long,
+        isEmptyList: (AndroidBridgeResponse) -> Boolean = { false },
+        forceRefresh: Boolean = false
     ): AndroidBridgeResponse? = discoveryRequestMutex.withLock {
         val now = System.currentTimeMillis()
         val cached = discoveryCache[query]
-        if (cached != null && DiscoveryRecoveryPolicy.isFresh(cached.cachedAtMs, now, ttlMs)) {
+        val effectiveTtlMs = DiscoveryRecoveryPolicy.cacheTtlMs(
+            configuredTtlMs = ttlMs,
+            isEmptyList = cached?.response?.let(isEmptyList) == true
+        )
+        if (!forceRefresh && cached != null && DiscoveryRecoveryPolicy.isFresh(cached.cachedAtMs, now, effectiveTtlMs)) {
             return@withLock cached.response
         }
 
@@ -550,9 +595,9 @@ class NestoraRepository {
     }
 
     /** Call after this process changes a listing that customers can discover. */
-    private fun invalidateDiscoveryCache() {
-        discoveryCache.clear()
-        discoveryFailures.clear()
+    private suspend fun invalidateDiscoveryCache() = discoveryRequestMutex.withLock {
+        discoveryCache.keys.removeAll(DiscoveryRecoveryPolicy::isListingQuery)
+        discoveryFailures.keys.removeAll(DiscoveryRecoveryPolicy::isListingQuery)
     }
 
     suspend fun chat(query: String, addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
@@ -611,6 +656,34 @@ class NestoraRepository {
     }
 
     // =========================================================================
+    // WALLET — get & load
+    // =========================================================================
+
+    suspend fun getWalletBalance(): Double = withContext(Dispatchers.IO) {
+        try {
+            val response = sendBridgeQuery("GET_WALLET_BALANCE")
+            if (response != null && response.ok) {
+                return@withContext response.walletBalance ?: 0.0
+            }
+        } catch (e: Throwable) {
+            Log.e("NestoraRepo", "[Inline] GET_WALLET_BALANCE error", e)
+        }
+        0.0
+    }
+
+    suspend fun addWalletBalance(amount: Double): Double = withContext(Dispatchers.IO) {
+        try {
+            val response = sendBridgeQuery("ADD_WALLET_BALANCE::${amount}")
+            if (response != null && response.ok) {
+                return@withContext response.walletBalance ?: 0.0
+            }
+        } catch (e: Throwable) {
+            Log.e("NestoraRepo", "[Inline] ADD_WALLET_BALANCE error", e)
+        }
+        0.0
+    }
+
+    // =========================================================================
     // PROFILE — update (uses compact JSON to stay well within 512-char limit)
     // =========================================================================
 
@@ -661,26 +734,22 @@ class NestoraRepository {
 
     /**
      * Uploads a profile photo by:
-     * 1. Copying the gallery [uri] to a temp file (TDLib needs a local path)
+     * 1. Normalizing the gallery [uri] into the same compact JPEG used by all
+     *    other user-uploaded media (TDLib needs a local path)
      * 2. Calling TdLibManager.sendPhotoToBot() which sends the photo as a Telegram
      *    message to the bot with caption "ANDROID_PROFILE_PIC::requestId"
      * 3. The backend saves the file_id and replies "AAPP_PHOTO_DONE::requestId::fileId"
      * 4. Returns the Telegram file_id string (to be stored in profilePicUrl)
      */
     suspend fun uploadProfilePhoto(uri: Uri, context: Context): String? = withContext(Dispatchers.IO) {
+        val prepared = com.estatenestora.app.util.ManagedImageProcessor.prepare(context, uri)
+        val preparedFile = prepared.getOrElse {
+            Log.w("NestoraRepo", "[PhotoUpload] Could not prepare selected profile photo", it)
+            return@withContext null
+        }
         try {
-            // Copy content:// URI bytes to a temp file TDLib can read by path
-            val tempFile = File(context.cacheDir, "profile_upload_${System.currentTimeMillis()}.jpg")
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                tempFile.outputStream().use { output -> input.copyTo(output) }
-            } ?: run {
-                Log.e("NestoraRepo", "[PhotoUpload] Failed to open input stream for URI: $uri")
-                return@withContext null
-            }
-
-            Log.d("NestoraRepo", "[PhotoUpload] Temp file written: ${tempFile.absolutePath} (${tempFile.length()} bytes)")
-            val fileId = TdLibManager.sendPhotoToBot(tempFile.absolutePath)
-            tempFile.delete() // Clean up temp file after send
+            Log.d("NestoraRepo", "[PhotoUpload] Prepared image: ${preparedFile.length()} bytes")
+            val fileId = TdLibManager.sendPhotoToBot(preparedFile.absolutePath)
 
             if (fileId != null) {
                 Log.d("NestoraRepo", "[PhotoUpload] Got file_id=$fileId")
@@ -691,6 +760,8 @@ class NestoraRepository {
         } catch (e: Throwable) {
             Log.e("NestoraRepo", "[PhotoUpload] Exception during photo upload", e)
             return@withContext null
+        } finally {
+            preparedFile.delete()
         }
     }
 
@@ -710,8 +781,11 @@ class NestoraRepository {
     suspend fun getLocalPhotoPath(remoteFileId: String, context: Context): String? = withContext(Dispatchers.IO) {
         if (remoteFileId.isBlank() || remoteFileId.length < 20) return@withContext null
 
-        val cacheDir = File(context.cacheDir, "profile_photos").apply { mkdirs() }
-        val cacheFile = File(cacheDir, "${remoteFileId.hashCode()}.jpg")
+        val cacheDir = File(context.cacheDir, "telegram_media").apply { mkdirs() }
+        val cacheKey = MessageDigest.getInstance("SHA-256")
+            .digest(remoteFileId.toByteArray(StandardCharsets.UTF_8))
+            .take(16).joinToString("") { "%02x".format(it) }
+        val cacheFile = File(cacheDir, "$cacheKey.jpg")
         if (cacheFile.exists() && cacheFile.length() > 0) {
             return@withContext cacheFile.absolutePath
         }
@@ -724,7 +798,9 @@ class NestoraRepository {
                 return@withContext null
             }
             val bytes = Base64.decode(b64, Base64.DEFAULT)
+            if (bytes.isEmpty() || bytes.size > 2_000_000) return@withContext null
             cacheFile.writeBytes(bytes)
+            trimManagedMediaCache(cacheDir)
             Log.d("NestoraRepo", "[PhotoDownload] Cached ${bytes.size} bytes -> ${cacheFile.absolutePath}")
             cacheFile.absolutePath
         } catch (e: Throwable) {
@@ -744,12 +820,12 @@ class NestoraRepository {
 
     suspend fun getServiceTypes(categorySlug: String): List<ServiceType> = withContext(Dispatchers.IO) {
         loadDiscovery("GET_SERVICE_TYPES::$categorySlug", DiscoveryRecoveryPolicy.CATALOG_TTL_MS)
-            ?.serviceTypes?.map { it.toServiceType() } ?: emptyList()
+            ?.serviceTypes?.map { it.toServiceType() }?.filter { it.isActive } ?: emptyList()
     }
 
     suspend fun getAllServiceTypes(): List<ServiceType> = withContext(Dispatchers.IO) {
         loadDiscovery("GET_ALL_SERVICE_TYPES", DiscoveryRecoveryPolicy.CATALOG_TTL_MS)
-            ?.serviceTypes?.map { it.toServiceType() } ?: emptyList()
+            ?.serviceTypes?.map { it.toServiceType() }?.filter { it.isActive } ?: emptyList()
     }
 
     /**
@@ -797,27 +873,119 @@ class NestoraRepository {
     // chat()'s free-text search which needs the LLM to figure out intent.
     // =========================================================================
 
-    suspend fun getFeedListings(addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+    suspend fun getFeedListings(
+        addressBarLatitude: Double? = null,
+        addressBarLongitude: Double? = null,
+        forceRefresh: Boolean = false
+    ): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         val query = withAddressBarCoordinates("GET_FEED_SERVICES", addressBarLatitude, addressBarLongitude)
-        loadDiscovery(query, DiscoveryRecoveryPolicy.FEED_TTL_MS)
+        loadDiscovery(
+            query = query,
+            ttlMs = DiscoveryRecoveryPolicy.FEED_TTL_MS,
+            isEmptyList = { it.listings.isNullOrEmpty() },
+            forceRefresh = forceRefresh
+        )
     }
 
     suspend fun searchByCategory(categorySlug: String, addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         loadDiscovery(
             withAddressBarCoordinates("SEARCH_CATEGORY::$categorySlug", addressBarLatitude, addressBarLongitude),
-            DiscoveryRecoveryPolicy.SEARCH_TTL_MS
+            DiscoveryRecoveryPolicy.SEARCH_TTL_MS,
+            isEmptyList = { it.listings.isNullOrEmpty() }
         )
     }
 
     suspend fun searchByServiceType(serviceTypeSlug: String, addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         loadDiscovery(
             withAddressBarCoordinates("SEARCH_SERVICE_TYPE::$serviceTypeSlug", addressBarLatitude, addressBarLongitude),
-            DiscoveryRecoveryPolicy.SEARCH_TTL_MS
+            DiscoveryRecoveryPolicy.SEARCH_TTL_MS,
+            isEmptyList = { it.listings.isNullOrEmpty() }
         )
     }
 
     suspend fun getMyListings(): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
-        sendBridgeQuery("GET_MY_LISTINGS")
+        loadDiscovery(
+            "GET_MY_LISTINGS",
+            DiscoveryRecoveryPolicy.PROVIDER_LISTINGS_TTL_MS,
+            isEmptyList = { it.listings.isNullOrEmpty() }
+        )
+    }
+
+    private fun trimManagedMediaCache(cacheDir: File, maxBytes: Long = 48L * 1024L * 1024L) {
+        val files = cacheDir.listFiles()?.filter { it.isFile }?.sortedBy { it.lastModified() } ?: return
+        var total = files.sumOf { it.length() }
+        for (file in files) {
+            if (total <= maxBytes) break
+            total -= file.length()
+            file.delete()
+        }
+    }
+
+    suspend fun getAppMedia(manage: Boolean = false): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        sendBridgeQuery(if (manage) "GET_APP_MEDIA::MANAGE" else "GET_APP_MEDIA")
+    }
+
+    suspend fun getMediaAssets(scope: String, scopeId: String, manage: Boolean = false): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        if (scope.isBlank() || (scope != "APP_CAROUSEL" && scopeId.isBlank())) return@withContext null
+        sendBridgeQuery("GET_MEDIA_ASSETS::${scope.uppercase(Locale.US)}::$scopeId${if (manage) "::MANAGE" else ""}")
+    }
+
+    suspend fun archiveMediaAsset(assetId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        if (assetId.isBlank()) return@withContext null
+        sendBridgeQuery("ARCHIVE_MEDIA_ASSET::$assetId")
+    }
+
+    suspend fun uploadManagedMedia(
+        uri: Uri,
+        context: Context,
+        scope: String,
+        scopeId: String,
+        role: String = "PRIMARY",
+        title: String = "",
+        subtitle: String = "",
+        actionLabel: String = "",
+        actionValue: String = "",
+        displayOrder: Int = 0
+    ): AndroidBridgeResponse = withContext(Dispatchers.IO) {
+        val prepared = com.estatenestora.app.util.ManagedImageProcessor.prepare(context, uri)
+        val preparedFile = prepared.getOrElse {
+            return@withContext AndroidBridgeResponse(false, "error", it.message ?: "This image could not be prepared.")
+        }
+        try {
+            val payload = com.google.gson.JsonObject().apply {
+                addProperty("scope", scope.uppercase(Locale.US))
+                addProperty("scope_id", scopeId)
+                addProperty("role", role.uppercase(Locale.US))
+                // Provider listing uploads need only the destination and role.
+                // Omitting blank metadata keeps this inline-query request below
+                // Telegram's hard input limit for both PRIMARY and GALLERY.
+                if (title.isNotBlank()) addProperty("title", title)
+                if (subtitle.isNotBlank()) addProperty("subtitle", subtitle)
+                if (actionLabel.isNotBlank()) addProperty("action_label", actionLabel)
+                if (actionValue.isNotBlank()) addProperty("action_value", actionValue)
+                if (displayOrder != 0) addProperty("display_order", displayOrder)
+            }
+            val encoded = Base64.encodeToString(
+                gson.toJson(payload).toByteArray(StandardCharsets.UTF_8),
+                Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+            )
+            val sessionResponse = sendBridgeQuery("BEGIN_MEDIA_UPLOAD::$encoded")
+            val session = sessionResponse?.mediaUpload
+                ?: return@withContext AndroidBridgeResponse(false, "error", sessionResponse?.reply ?: "Could not start image upload.")
+            val upload = TdLibManager.sendManagedMediaToBot(preparedFile.absolutePath, session.token)
+                ?: return@withContext AndroidBridgeResponse(false, "error", "Image upload was interrupted. Please try again.")
+            if (upload.assetId.isNullOrBlank()) {
+                return@withContext AndroidBridgeResponse(false, "error", upload.error ?: "The image could not be saved.")
+            }
+            AndroidBridgeResponse(true, "media_upload_complete", "Image saved")
+        } finally {
+            preparedFile.delete()
+        }
+    }
+
+    /** One aggregated read used only when the provider Dashboard becomes visible. */
+    suspend fun getProviderDashboard() = withContext(Dispatchers.IO) {
+        sendBridgeQuery("GET_PROVIDER_DASHBOARD", isBackground = true)?.providerDashboard
     }
 
     suspend fun setListingActive(listingId: String, active: Boolean): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
@@ -890,26 +1058,23 @@ class NestoraRepository {
         val basePrice: Double,
         val locationDisplayName: String,
         val city: String,
+        val latitude: Double,
+        val longitude: Double,
+        val serviceName: String,
         val description: String,
         val collectedAttributes: Map<String, String> = emptyMap()
     )
 
     suspend fun registerService(form: RegisterServiceRequest): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
-        // The form may contain a full map address, description and dynamic
-        // attributes, which cannot fit inside Telegram's 256-char inline-query
-        // input limit. Transfer its JSON as small base64url chunks instead.
+        // Transfer the selected service type and precise map location as small
+        // base64url chunks to stay within Telegram's inline-query input limit.
         val payload = com.google.gson.JsonObject().apply {
             addProperty("category_slug", form.categorySlug)
             addProperty("service_type_slug", form.serviceTypeSlug)
-            addProperty("base_price", form.basePrice)
             addProperty("location_display_name", form.locationDisplayName)
             addProperty("city", form.city)
-            addProperty("description", form.description)
-            if (form.collectedAttributes.isNotEmpty()) {
-                val attrsObj = com.google.gson.JsonObject()
-                form.collectedAttributes.forEach { (k, v) -> attrsObj.addProperty(k, v) }
-                add("collected_attributes", attrsObj)
-            }
+            addProperty("latitude", form.latitude)
+            addProperty("longitude", form.longitude)
         }
         val started = sendRegistrationBridgeStep("REGISTER_SERVICE_START::${form.serviceTypeSlug}")
             ?: return@withContext null
@@ -926,7 +1091,9 @@ class NestoraRepository {
             ) ?: return@withContext null
             if (!saved.ok) return@withContext saved
         }
-        sendRegistrationBridgeStep("REGISTER_SERVICE_SUBMIT::${started.registrationToken}")
+        sendRegistrationBridgeStep("REGISTER_SERVICE_SUBMIT::${started.registrationToken}")?.also { response ->
+            if (response.ok) invalidateDiscoveryCache()
+        }
     }
 
     /** Registration chunk operations are idempotent and can safely retry once. */
@@ -957,7 +1124,9 @@ class NestoraRepository {
     }
 
     suspend fun aisoSave(): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
-        sendBridgeQuery("AISO_SAVE")
+        sendBridgeQuery("AISO_SAVE")?.also { response ->
+            if (response.ok) invalidateDiscoveryCache()
+        }
     }
 
     suspend fun aisoReset(): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
@@ -1024,7 +1193,8 @@ class NestoraRepository {
     private data class CreateBookingPayload(
         val home: Boolean,
         val lat: Double,
-        val lon: Double
+        val lon: Double,
+        val address: String
     )
 
     // Split into two short bridge queries instead of one long one: Telegram
@@ -1037,6 +1207,34 @@ class NestoraRepository {
     // (still safely below the cap); the potentially long address follows in a
     // separate SET_INITIAL_LOCATION call. Coordinates are intentionally in
     // CREATE_BOOKING so the backend can persist them with the booking itself.
+    /**
+     * Builds the compact, atomic booking-create request. The address is stored
+     * in the same database transaction as the booking, so a slow follow-up
+     * bridge call can never leave a detail screen with an empty destination.
+     */
+    internal fun buildCreateBookingCommand(
+        listingId: String,
+        home: Boolean,
+        lat: Double,
+        lon: Double,
+        address: String
+    ): String {
+        // The bridge envelope adds a 13-digit request ID. Keep the complete
+        // query below Telegram's hard inline-query limit while retaining as
+        // much of the human-readable address as will fit.
+        var safeAddress = address.replace("\n", " ").replace("\r", " ").trim().take(110)
+        fun commandFor(value: String): String =
+            "CREATE_BOOKING::${listingId}::${Gson().toJson(CreateBookingPayload(home, lat, lon, value))}"
+
+        var command = commandFor(safeAddress)
+        val bridgeEnvelopeLength = "AAPP::0000000000000::".length
+        while (bridgeEnvelopeLength + command.length > MAX_INLINE_QUERY_LEN && safeAddress.isNotEmpty()) {
+            safeAddress = safeAddress.dropLast(1)
+            command = commandFor(safeAddress)
+        }
+        return command
+    }
+
     suspend fun createBooking(listingId: String, home: Boolean, lat: Double, lon: Double, address: String): CreateBookingResult = withContext(Dispatchers.IO) {
         if (!areValidBookingCoordinates(lat, lon)) {
             return@withContext CreateBookingResult(
@@ -1045,16 +1243,8 @@ class NestoraRepository {
             )
         }
 
-        val payload = Gson().toJson(CreateBookingPayload(home, lat, lon))
-        val response = sendBridgeQuery("CREATE_BOOKING::${listingId}::${payload}")
+        val response = sendBridgeQuery(buildCreateBookingCommand(listingId, home, lat, lon, address))
         val bookingId = if (response?.ok == true) response.bookingId else null
-
-        if (bookingId != null) {
-            for (attempt in 0..2) {
-                if (setInitialBookingLocation(bookingId, lat, lon, address)) break
-                if (attempt < 2) delay(750L * (attempt + 1))
-            }
-        }
 
         CreateBookingResult(
             bookingId = bookingId,
@@ -1081,13 +1271,68 @@ class NestoraRepository {
         sendBridgeQuery("GET_LISTING_AVAILABILITY::$listingId")
     }
 
+    suspend fun getEngagementDraftAvailabilityResponse(draftId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("GET_DRAFT_AVAILABILITY::$draftId")
+    }
+
+    suspend fun getListingServiceCatalogResponse(listingId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("GET_LISTING_SERVICE_CATALOG::$listingId")
+    }
+
+    suspend fun getProviderServiceCatalogResponse(listingId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        if (listingId.isBlank()) return@withContext null
+        sendBridgeQuery("GET_PROVIDER_SERVICE_CATALOG::$listingId")
+    }
+
+    /** Provider-only catalogue writes use the same bounded, idempotent chunk
+     * transport as listing edits. A normal work-item description or package
+     * already exceeds Telegram's 256-character inline-query limit after JSON
+     * and Base64 encoding, so a one-shot UPSERT command is not reliable. */
+    private suspend fun saveProviderServiceCatalogItem(action: String, listingId: String, payload: com.google.gson.JsonObject): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        if (listingId.isBlank()) return@withContext AndroidBridgeResponse(false, "error", "Choose a service listing before saving.")
+        val bytes = payload.toString().toByteArray(StandardCharsets.UTF_8)
+        val encoded = Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        val chunks = providerCatalogWriteChunks(encoded, bytes.size)
+            ?: return@withContext AndroidBridgeResponse(false, "error", "These service details are too large. Shorten the descriptions and try again.")
+        val kind = when (action) {
+            "UPSERT_PROVIDER_SERVICE_OFFERING" -> "offering"
+            "UPSERT_PROVIDER_SERVICE_PACKAGE" -> "package"
+            else -> return@withContext AndroidBridgeResponse(false, "error", "This package action is not supported.")
+        }
+        val started = sendBridgeQuery("PROVIDER_CATALOG_WRITE_START::$kind::$listingId")
+            ?: return@withContext AndroidBridgeResponse(false, "error", "Could not start saving. Check your connection and try again.")
+        if (!started.ok || started.registrationToken.isNullOrBlank()) return@withContext started
+        for ((index, chunk) in chunks.withIndex()) {
+            val saved = sendBridgeQuery("PROVIDER_CATALOG_WRITE_CHUNK::${started.registrationToken}::$index::${chunks.size}::$chunk")
+                ?: return@withContext AndroidBridgeResponse(false, "error", "Saving was interrupted. Your entries remain on screen; tap Save again.")
+            if (!saved.ok) return@withContext saved
+        }
+        (sendBridgeQuery("PROVIDER_CATALOG_WRITE_SUBMIT::${started.registrationToken}")
+            ?: AndroidBridgeResponse(false, "error", "Nestora could not confirm the save. Your entries remain on screen; tap Save again."))
+            .also { response ->
+                if (response.ok) invalidateDiscoveryCache()
+            }
+    }
+
+    suspend fun saveProviderServiceOffering(listingId: String, payload: com.google.gson.JsonObject): AndroidBridgeResponse? =
+        saveProviderServiceCatalogItem("UPSERT_PROVIDER_SERVICE_OFFERING", listingId, payload)
+
+    suspend fun saveProviderServicePackage(listingId: String, payload: com.google.gson.JsonObject): AndroidBridgeResponse? =
+        saveProviderServiceCatalogItem("UPSERT_PROVIDER_SERVICE_PACKAGE", listingId, payload)
+
     suspend fun getListingAvailability(listingId: String): List<com.estatenestora.app.data.model.AvailabilitySlot> = withContext(Dispatchers.IO) {
         getListingAvailabilityResponse(listingId)?.availabilitySlots ?: emptyList()
     }
     suspend fun getProviderAvailability(listingId: String) = withContext(Dispatchers.IO) { sendBridgeQuery("GET_PROVIDER_AVAILABILITY::$listingId")?.providerAvailability }
-    suspend fun setProviderAvailability(listingId: String, preset: String) = withContext(Dispatchers.IO) { sendBridgeQuery("SET_PROVIDER_AVAILABILITY::$listingId::$preset")?.providerAvailability }
+    suspend fun setProviderAvailability(listingId: String, preset: String) = withContext(Dispatchers.IO) {
+        sendBridgeQuery("SET_PROVIDER_AVAILABILITY::$listingId::$preset")?.also { response ->
+            if (response.ok) invalidateDiscoveryCache()
+        }?.providerAvailability
+    }
     suspend fun setCustomProviderAvailability(listingId: String, daysCsv: String, startTime: String, endTime: String) = withContext(Dispatchers.IO) {
-        sendBridgeQuery("SET_CUSTOM_PROVIDER_AVAILABILITY::$listingId::$daysCsv::$startTime::$endTime")?.providerAvailability
+        sendBridgeQuery("SET_CUSTOM_PROVIDER_AVAILABILITY::$listingId::$daysCsv::$startTime::$endTime")?.also { response ->
+            if (response.ok) invalidateDiscoveryCache()
+        }?.providerAvailability
     }
     suspend fun pauseBookingForReschedule(bookingId: String, actualStopAtUtc: String) = withContext(Dispatchers.IO) {
         sendBridgeQuery("PAUSE_BOOKING_FOR_RESCHEDULE::$bookingId::$actualStopAtUtc")
@@ -1150,6 +1395,26 @@ class NestoraRepository {
         sendIdempotentEngagementDraftStep("SET_DRAFT_TIME_PREFERENCE::$draftId::$timeTerm::$encoded")
     }
 
+    /** Stores only opaque offer/package IDs. The backend calculates and snapshots price and duration. */
+    suspend fun setEngagementDraftServiceSelection(draftId: String, selection: com.google.gson.JsonObject): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        if (draftId.isBlank()) return@withContext AndroidBridgeResponse(false, "error", "This booking form is unavailable. Open the service again.")
+        val bytes = selection.toString().toByteArray(StandardCharsets.UTF_8)
+        if (bytes.isEmpty() || bytes.size > 10_000) return@withContext AndroidBridgeResponse(false, "error", "Your cart contains too many details. Remove some items and try again.")
+        val encoded = Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        val chunks = providerCatalogWriteChunks(encoded, bytes.size)
+            ?: return@withContext AndroidBridgeResponse(false, "error", "Your cart is too large. Remove some items and try again.")
+        val started = sendBridgeQuery("DRAFT_SERVICE_SELECTION_WRITE_START::$draftId")
+            ?: return@withContext AndroidBridgeResponse(false, "error", "Could not start saving your cart. Check your connection and try again.")
+        if (!started.ok || started.registrationToken.isNullOrBlank()) return@withContext started
+        for ((index, chunk) in chunks.withIndex()) {
+            val saved = sendBridgeQuery("DRAFT_SERVICE_SELECTION_WRITE_CHUNK::${started.registrationToken}::$index::${chunks.size}::$chunk")
+                ?: return@withContext AndroidBridgeResponse(false, "error", "Saving your cart was interrupted. Tap Continue again.")
+            if (!saved.ok) return@withContext saved
+        }
+        sendBridgeQuery("DRAFT_SERVICE_SELECTION_WRITE_SUBMIT::${started.registrationToken}")
+            ?: AndroidBridgeResponse(false, "error", "Nestora could not confirm your cart. Tap Continue again.")
+    }
+
     suspend fun setEngagementDraftNote(draftId: String, note: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         sendIdempotentEngagementDraftStep("SET_DRAFT_NOTE::$draftId::${note.replace("\n", " ").take(150)}")
     }
@@ -1202,6 +1467,13 @@ class NestoraRepository {
         if (scope.length !in 3..180 || visitFeePaise < 0 || labourPaise < 0 || materialsPaise < 0 || expiryMinutes !in 5..10080) return@withContext null
         val encodedScope = Base64.encodeToString(scope.toByteArray(StandardCharsets.UTF_8), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
         sendBridgeQuery("CREATE_ENGAGEMENT_QUOTE::$engagementId::$visitFeePaise::$labourPaise::$materialsPaise::$expiryMinutes::$encodedScope")
+    }
+
+    /** Provider accepts a request and records an updated direct-pay service estimate in one action. */
+    suspend fun acceptBookingWithQuote(bookingId: String, scope: String, visitFeePaise: Long, labourPaise: Long, materialsPaise: Long): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        if (bookingId.isBlank() || scope.length !in 3..180 || visitFeePaise < 0 || labourPaise < 0 || materialsPaise < 0) return@withContext null
+        val encodedScope = Base64.encodeToString(scope.toByteArray(StandardCharsets.UTF_8), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        sendBridgeQuery("ACCEPT_BOOKING_WITH_QUOTE::$bookingId::$visitFeePaise::$labourPaise::$materialsPaise::$encodedScope")
     }
 
     suspend fun decideEngagementQuote(quoteId: String, accept: Boolean): Boolean = withContext(Dispatchers.IO) {
@@ -1265,9 +1537,13 @@ class NestoraRepository {
         sendBridgeQuery("SET_BOOKING_ADDRESS::${bookingId}::${address}::${lat}::${lon}")?.ok ?: false
     }
 
-    suspend fun startTravel(bookingId: String, lat: Double? = null, lon: Double? = null): Boolean = withContext(Dispatchers.IO) {
+    /**
+     * Keep the bridge reply for GPS-start failures. The provider needs to know
+     * whether the scheduled-time or location-safety gate stopped the trip.
+     */
+    suspend fun startTravel(bookingId: String, lat: Double? = null, lon: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         val queryStr = if (lat != null && lon != null) "START_TRAVEL::${bookingId}::${lat}::${lon}" else "START_TRAVEL::$bookingId"
-        sendBridgeQuery(queryStr)?.ok ?: false
+        sendBridgeQuery(queryStr)
     }
 
     suspend fun markArrived(bookingId: String): Boolean = withContext(Dispatchers.IO) {
@@ -1323,6 +1599,14 @@ class NestoraRepository {
 
     suspend fun cancelBooking(bookingId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         sendBridgeQuery("CANCEL_BOOKING::$bookingId")
+    }
+
+    suspend fun confirmCancellationPaymentSent(bookingId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("CONFIRM_CANCELLATION_PAYMENT_SENT::$bookingId")
+    }
+
+    suspend fun confirmCancellationPaymentReceived(bookingId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("CONFIRM_CANCELLATION_PAYMENT_RECEIVED::$bookingId")
     }
 
     suspend fun getPaymentInfo(bookingId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {

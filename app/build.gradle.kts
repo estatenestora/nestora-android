@@ -55,11 +55,30 @@ android {
             signingConfig = signingConfigs.getByName("debugConfig")
         }
         release {
-            isMinifyEnabled = false
+            // Release users must never receive the debug/universal artifact.
+            // R8 removes unused Kotlin/Compose code and resource shrinking
+            // removes unreachable packaged resources after minification.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+
+    // An Android App Bundle lets Play deliver only the device's ABI and screen
+    // resources. This prevents an arm64 customer from downloading x86,
+    // x86_64, and armeabi-v7a copies of TDLib and MapLibre.
+    bundle {
+        abi {
+            enableSplit = true
+        }
+        density {
+            enableSplit = true
+        }
+        language {
+            enableSplit = false
         }
     }
     compileOptions {
@@ -108,6 +127,7 @@ dependencies {
 
     // Coil Image Loader
     implementation(libs.coil.compose)
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     // MapLibre GL Native — 100% open source (BSD-2), free forever, no API key
     // required for the SDK itself. Paired with OpenFreeMap's free, unlimited

@@ -16,7 +16,9 @@ class TopMenuVisualPolicyTest {
         assertEquals(selected.verticalOffsetDp, inactive.verticalOffsetDp)
         assertTrue(selected.zIndex > inactive.zIndex)
         assertEquals(1f, selected.alpha, 0f)
-        assertTrue(inactive.alpha < selected.alpha)
+        assertTrue(inactive.alpha <= 0.72f)
+        assertEquals(Color.White, topMenuIndicatorColor(isSelected = true))
+        assertEquals(Color.Transparent, topMenuIndicatorColor(isSelected = false))
     }
 
     @Test
@@ -27,6 +29,7 @@ class TopMenuVisualPolicyTest {
         assertTrue(surface != Color.White)
         assertEquals(theme.backgroundGradient.last(), surface)
         assertEquals(surface, topMenuTabBackground(theme, isSelected = true))
+        assertEquals(theme.inactiveTabCardBg, topMenuTabBackground(theme, isSelected = false))
     }
 
     @Test

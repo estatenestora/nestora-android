@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
@@ -32,6 +33,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -101,7 +103,7 @@ fun BookingDetailScreen(
     onBack: () -> Unit,
     onAccept: () -> Unit = {},
     onReject: () -> Unit = {},
-    onStartTravel: (Double, Double) -> Unit = { _, _ -> },
+    onStartTravel: (Double, Double, (String?) -> Unit) -> Unit = { _, _, _ -> },
     onMarkArrived: () -> Unit = {},
     onVerifyOtp: (String, (String?) -> Unit) -> Unit = { _, _ -> },
     onStartService: () -> Unit = {},
@@ -130,6 +132,7 @@ fun BookingDetailScreen(
     var isSubmittingCancel by remember { mutableStateOf(false) }
     var isSubmittingPayment by remember { mutableStateOf(false) }
     var cancelError by remember { mutableStateOf<String?>(null) }
+    var travelErrorAlert by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var showMenu by remember { mutableStateOf(false) }
@@ -247,6 +250,48 @@ fun BookingDetailScreen(
     }
 
 
+            // GPS Tracking Alert Dialog
+            if (travelErrorAlert != null) {
+                AlertDialog(
+                    onDismissRequest = { travelErrorAlert = null },
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "GPS Tracking Status",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = Color(0xFF1A202C)
+                            )
+                            IconButton(onClick = { travelErrorAlert = null }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close dialog",
+                                    tint = Color(0xFF718096),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    },
+                    text = {
+                        Text(
+                            text = travelErrorAlert!!,
+                            fontSize = 14.sp,
+                            color = Color(0xFF4A5568),
+                            lineHeight = 20.sp
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { travelErrorAlert = null }) {
+                            Text("OK", color = NestoraMint, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                )
+            }
+
             // Cancellation Alert Dialog
             if (showCancelDialog && detail != null) {
                 LaunchedEffect(detail.id) {
@@ -343,7 +388,7 @@ fun BookingDetailScreen(
                     title = { Text("Accept Booking Request", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF0D1A13)) },
                     text = {
                         Text(
-                            "Accept this request at the listed price of ₹${detail.serviceFee.toInt()}? The customer will then pay the full pre-service amount, including any travel fee, before work can start.",
+                            "Accept this request with a provider service amount of ₹${(detail.serviceScope?.providerAmount ?: detail.serviceFee).toInt()}? The customer pays only Nestora's booking fee now and pays your service amount directly after the work.",
                             fontSize = 13.sp,
                             color = Color(0xFF4A5568)
                         )
@@ -416,7 +461,7 @@ fun BookingDetailScreen(
 
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF7FDFA))) {
+        Column(modifier = Modifier.fillMaxSize().background(Color.White)) {
             if (detail == null) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = NestoraMint)
@@ -434,7 +479,13 @@ fun BookingDetailScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color(0xFFF7FDFA))
+                            // Completed bookings use one scrolling document.
+                            // Reserve the system-bar inset at the document
+                            // boundary so no payment/review content can scroll
+                            // underneath the status icons.
+                            .background(Color(0xFF00382B))
+                            .statusBarsPadding()
+                            .background(Color.White)
                             .imePadding()
                             .verticalScroll(rememberScrollState())
                     ) {
@@ -470,7 +521,6 @@ fun BookingDetailScreen(
                             IconButton(
                                 onClick = onBack,
                                 modifier = Modifier
-                                    .statusBarsPadding()
                                     .padding(16.dp)
                                     .align(Alignment.TopStart)
                             ) {
@@ -484,9 +534,8 @@ fun BookingDetailScreen(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // Final settlement summary — the remaining amount is paid
-                        // directly customer-to-provider, off-platform; this is just
-                        // the breakdown so both sides see the same numbers.
+                        // Final summary keeps Nestora's paid booking fee separate
+                        // from the provider amount settled after service.
                         Surface(
                             shape = RoundedCornerShape(18.dp),
                             color = Color.White,
@@ -496,22 +545,19 @@ fun BookingDetailScreen(
                         ) {
                             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Payment Summary", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0D1A13))
-                                val effectiveFee = detail.agreedPrice ?: detail.serviceFee
-                                DetailMetadataRow("Service Fee", "₹${effectiveFee.toInt()}")
-                                DetailMetadataRow("Full pre-service payment", "₹${(detail.advanceAmount ?: 0.0).toInt()}")
-                                if (detail.commutingFee > 0) {
-                                    DetailMetadataRow("Commuting Fee", "₹${detail.commutingFee.toInt()}")
-                                }
+                                val providerAmount = detail.serviceScope?.providerAmount ?: detail.agreedPrice ?: detail.serviceFee
+                                DetailMetadataRow("Provider service amount", "₹${providerAmount.toInt()}")
+                                DetailMetadataRow("Nestora booking fee paid", "₹${detail.platformFeeAmount.toInt()}")
                                 DashedDivider()
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text(
-                                        "Remaining after pre-service payment",
+                                        "Provider payment",
                                         fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0D1A13)
                                     )
-                                    Text("₹${detail.remainingAmount.toInt()}", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = NestoraMint)
+                                    Text("After service", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = NestoraMint)
                                 }
                                 Text(
-                                    "Nestora collects the full agreed amount before service starts. No payment is due after service.",
+                                    "The service amount is settled directly with the provider after the completed work. Nestora collects only its booking fee.",
                                     fontSize = 11.sp, color = NestoraTextMuted
                                 )
                             }
@@ -683,12 +729,12 @@ fun BookingDetailScreen(
                         }
                         "PAYMENT_PENDING" -> {
                             statusHeader = if (isViewerProvider) "Request Accepted!" else "Pay to Confirm"
-                            statusSubtext = if (isViewerProvider) "Waiting for the customer’s full pre-service payment." else "Pay the full pre-service amount to confirm this booking."
+                            statusSubtext = if (isViewerProvider) "Waiting for the customer to pay Nestora's booking fee." else "Pay Nestora's booking fee to confirm and unlock contact details."
                             etaMinutes = "Pay"
                         }
                         "PAYMENT_UPLOADED" -> {
                             statusHeader = "Payment Submitted!"
-                            statusSubtext = "Nestora is verifying the pre-service payment."
+                            statusSubtext = "Nestora is verifying the booking-fee payment."
                             etaMinutes = "Verify"
                         }
                         "CONFIRMED" -> {
@@ -794,21 +840,21 @@ fun BookingDetailScreen(
                             val mapDestinationLon = trackingDestinationLon
                             // Pre-approval: neither map data nor addresses are relevant
                             // yet on either flow — nothing has been approved/paid.
-                            val advanceApproved = statusU !in listOf("REQUESTED", "PAYMENT_PENDING")
+                            val bookingFeeApproved = statusU !in listOf("REQUESTED", "PAYMENT_PENDING")
                             val activeStatuses = listOf("CONFIRMED", "PROVIDER_EN_ROUTE", "PROVIDER_ARRIVED", "OTP_VERIFIED", "SERVICE_STARTED")
                             // Home-service: the SAME map component covers both states —
                             // a real map with just the customer pinned (traveler=null)
                             // before "GPS Tracking" is tapped, and live route/ETA once a
                             // traveler position exists — never a fake placeholder box.
-                            val showLiveMap = detail.isHomeService && advanceApproved && statusU in activeStatuses
-                            // Appointment: once the customer's advance is at least
+                            val showLiveMap = detail.isHomeService && bookingFeeApproved && statusU in activeStatuses
+                            // Appointment: once the customer's booking fee is
                             // submitted (PAYMENT_UPLOADED+), show both fixed positions
                             // on a static map — neither party has live GPS tracking here.
-                            val showStaticDualMap = !detail.isHomeService && advanceApproved && statusU in activeStatuses &&
+                            val showStaticDualMap = !detail.isHomeService && bookingFeeApproved && statusU in activeStatuses &&
                                 detail.customerLatitude != null && detail.customerLongitude != null &&
                                 detail.destinationLatitude != null && detail.destinationLongitude != null
 
-                            if (!advanceApproved) {
+                            if (!bookingFeeApproved) {
                                 Box(
                                     modifier = Modifier.fillMaxSize().background(Color(0xFFEFF6F2)),
                                     contentAlignment = Alignment.Center
@@ -816,7 +862,7 @@ fun BookingDetailScreen(
                                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                         Icon(Icons.Default.LocationOn, contentDescription = null, tint = NestoraTextMuted, modifier = Modifier.size(36.dp))
                                         Text(
-                                            if (detail.isHomeService) "Address & map unlock once Nestora approves the advance" else "Location & map unlock once the advance is paid",
+                                            if (detail.isHomeService) "Address and map unlock after Nestora approves the booking fee" else "Location and map unlock after the booking fee is paid",
                                             fontSize = 13.sp, color = Color(0xFF33443C), textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp)
                                         )
                                     }
@@ -1019,12 +1065,16 @@ fun BookingDetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
+                            // The map/header is fixed above this list. Clipping
+                            // prevents stretch overscroll and fast flings from
+                            // drawing detail rows over that fixed surface.
+                            .clipToBounds()
                             .padding(horizontal = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         item { Spacer(Modifier.height(4.dp)) }
 
-                        // Upfront Advance Payment / Actions / OTP Card (Unified Action & Status Panel - before While you wait, after Map)
+                        // Booking fee / actions / OTP panel (before While you wait, after Map)
                         val showActionsTopCard = detail.status.uppercase() in listOf(
                             "REQUESTED", "PAYMENT_PENDING", "PAYMENT_UPLOADED", "CONFIRMED",
                             "PROVIDER_EN_ROUTE", "PROVIDER_ARRIVED", "CUSTOMER_ARRIVED", "OTP_VERIFIED", "SERVICE_STARTED"
@@ -1165,26 +1215,22 @@ fun BookingDetailScreen(
                                             if (isViewerProvider) {
                                                 var billing by remember(detail.id, detail.status) { mutableStateOf<com.estatenestora.app.data.model.PaymentInfo?>(null) }
                                                 LaunchedEffect(detail.id, detail.status) { billing = onGetPaymentInfo(detail.id) }
-                                                val advanceAmt = billing?.amount ?: detail.advanceAmount ?: 0.0
+                                                val bookingFee = billing?.amount ?: detail.platformFeeAmount
                                                 
                                                 Text(
-                                                    text = if (detail.status == "PAYMENT_UPLOADED") "Payment submitted — awaiting Nestora verification" else "Waiting for the customer’s pre-service payment",
+                                                    text = if (detail.status == "PAYMENT_UPLOADED") "Booking fee submitted — awaiting Nestora verification" else "Waiting for the customer's Nestora booking fee",
                                                     fontSize = 13.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = Color(0xFF0D1A13),
                                                     textAlign = TextAlign.Center
                                                 )
-                                                Text("Full pre-service payment: ₹${advanceAmt.toInt()}", fontSize = 12.sp, color = NestoraTextMuted)
-                                                if (detail.commutingFee > 0) {
-                                                    Text("Includes travel fee: ₹${detail.commutingFee.toInt()}", fontSize = 12.sp, color = NestoraTextMuted)
-                                                }
-                                                Text("No amount is due after service.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NestoraMint)
+                                                Text("Nestora booking fee: ₹${bookingFee.toInt()}", fontSize = 12.sp, color = NestoraTextMuted)
+                                                Text("The customer pays your service amount directly after work.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NestoraMint)
                                             } else {
-                                                val effectiveFee = detail.agreedPrice ?: detail.serviceFee
-                                                val advanceAmt = detail.advanceAmount ?: (effectiveFee + detail.commutingFee)
+                                                val bookingFee = detail.platformFeeAmount.takeIf { it > 0.0 } ?: detail.advanceAmount ?: 0.0
 
                                                 Text(
-                                                    text = "Full pre-service payment due: ₹${advanceAmt.toInt()}",
+                                                    text = "Nestora booking fee due: ₹${bookingFee.toInt()}",
                                                     fontSize = 14.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = Color(0xFFAB3B3B),
@@ -1201,7 +1247,7 @@ fun BookingDetailScreen(
                                                          ) {
                                                              Column(modifier = Modifier.padding(14.dp)) {
                                                                  Text(
-                                                                     text = "⚠️ Last Payment Rejected",
+                                                                     text = "Last Payment Rejected",
                                                                      fontSize = 12.sp,
                                                                      fontWeight = FontWeight.Bold,
                                                                      color = Color(0xFFC53030)
@@ -1217,7 +1263,7 @@ fun BookingDetailScreen(
                                                          }
                                                      }
                                                     Text(
-                                                        text = "This covers the agreed service price and any travel fee. Pay using a UPI app, then tap ‘Confirm Payment’. No post-service payment will be requested.",
+                                                        text = "This payment is only Nestora's booking fee. Pay the provider service amount directly after work, then tap ‘Confirm Payment’ here.",
                                                         fontSize = 11.sp,
                                                         color = NestoraTextMuted,
                                                         textAlign = TextAlign.Center,
@@ -1378,7 +1424,11 @@ fun BookingDetailScreen(
                                                                     gpsError = null
                                                                     val loc = getCurrentLocation(context)
                                                                     if (loc != null) {
-                                                                        onStartTravel(loc.latitude, loc.longitude)
+                                                                        onStartTravel(loc.latitude, loc.longitude) { error ->
+                                                                            if (error != null) {
+                                                                                travelErrorAlert = error
+                                                                            }
+                                                                        }
                                                                     } else {
                                                                         gpsError = "Could not get your GPS location. Please check location permissions and try again."
                                                                     }
@@ -1483,7 +1533,7 @@ fun BookingDetailScreen(
                                                             }
 
                                                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                                Text("Advance approved. Tap to start sharing your live location:", fontSize = 12.sp, color = NestoraTextMuted, textAlign = TextAlign.Center)
+                                                                Text("Booking fee approved. Tap to start sharing your live location:", fontSize = 12.sp, color = NestoraTextMuted, textAlign = TextAlign.Center)
                                                                 // GPS only — no map-picker alternative. Once commuting starts,
                                                                 // it's the provider's real, continuously-updating position
                                                                 // that matters, not a one-off manually chosen point.
@@ -1605,7 +1655,7 @@ fun BookingDetailScreen(
                                                     "CONFIRMED" -> {
                                                         if (detail.isHomeService) {
                                                             Text(
-                                                                text = "Advance approved! Waiting for $counterpartName to start commuting.",
+                                                                text = "Booking fee approved. Waiting for $counterpartName to start commuting.",
                                                                 fontSize = 13.sp, fontWeight = FontWeight.Medium, color = NestoraTextMuted, textAlign = TextAlign.Center
                                                             )
                                                         } else {
@@ -1805,36 +1855,83 @@ fun BookingDetailScreen(
                                     // Dashed Divider
                                     DashedDivider(modifier = Modifier.padding(vertical = 14.dp))
 
-                                    // Real details block showing price, booking status, created times, and IDs
+                                    // Booking identity, timing and provider-side service amount.
+                                    // Nestora's own fee is deliberately shown in the separate
+                                    // payment card below so customers never read their sum as an
+                                    // amount payable to Nestora.
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        val effectiveFee = detail.agreedPrice ?: detail.serviceFee
-                                        val totalPrice = effectiveFee + detail.commutingFee
-                                        val remainingAmt = detail.remainingAmount
-
-                                        DetailMetadataRow("Booking Reference", "#${detail.referenceCode.ifBlank { detail.id.take(8) }}")
-                                        if (detail.createdAt.isNotBlank()) {
-                                            DetailMetadataRow("Booked Date & Time", formatIso(detail.createdAt))
-                                        }
                                         if (!detail.scheduledStartAt.isNullOrBlank() && !detail.scheduledEndAt.isNullOrBlank()) {
                                             DetailMetadataRow("Service time", "${formatIso(detail.scheduledStartAt)} – ${formatIso(detail.scheduledEndAt)}")
                                         }
-                                        if (detail.agreedPrice != null) {
-                                            DetailMetadataRow("Agreed Price", "₹${detail.agreedPrice.toInt()}")
-                                        } else {
-                                            DetailMetadataRow("Service Fee", "₹${detail.serviceFee.toInt()}")
+                                        if (detail.createdAt.isNotBlank()) {
+                                            DetailMetadataRow("Booked Date & Time", formatIso(detail.createdAt))
                                         }
-                                        if (detail.commutingFee > 0.0) {
-                                            DetailMetadataRow("Commuting Fee", "₹${detail.commutingFee.toInt()}")
-                                        }
-                                        if (detail.advanceAmount != null && detail.advanceAmount > 0.0) {
-                                            DetailMetadataRow("Pre-service payment", "-₹${detail.advanceAmount.toInt()}")
-                                            DetailMetadataRow("Total", "₹${remainingAmt.toInt()}")
-                                        } else {
-                                            DetailMetadataRow("Total", "₹${totalPrice.toInt()}")
-                                        }
+                                        DetailMetadataRow("Booking Reference", "#${detail.referenceCode.ifBlank { detail.id.take(8) }}")
+                                        val selectedScope = detail.serviceSelection?.let(::bookingServiceSelectionPresentation)
+                                        val providerAmount = selectedScope?.providerAmount ?: detail.agreedPrice ?: detail.serviceFee
+                                        DetailMetadataRow(
+                                            if (selectedScope != null || detail.agreedPrice != null) "Provider service amount" else "Service starting from",
+                                            "₹${providerAmount.toInt()}"
+                                        )
+                                        selectedScope?.durationMinutes?.let { DetailMetadataRow("Expected work time", "$it min") }
+                                        DetailMetadataRow("Provider payment", "After service")
                                     }
                                 }
                             }
+                        }
+
+                        // ==========================================
+                        // 4. Payment Details Card
+                        // ==========================================
+                        item {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "NESTORA PAYMENT DETAILS",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF2D3748),
+                                    letterSpacing = 1.sp
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(42.dp)
+                                        .height(2.5.dp)
+                                        .background(Color(0xFFE53E3E))
+                                )
+                            }
+                        }
+
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color.White,
+                                border = BorderStroke(1.dp, Color(0xFFEDF2F7)),
+                                shadowElevation = 2.dp,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    val isPaid = !detail.platformFeePaidAt.isNullOrBlank()
+                                    DetailMetadataRow("Nestora platform fee", "₹${detail.platformFeeAmount.toInt()}")
+
+                                    DashedDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                                    DetailMetadataRow("Transaction Id", if (isPaid) "TXN-${detail.id.take(8).uppercase()}" else "-")
+                                    DetailMetadataRow("Transaction Date & Time", if (isPaid) formatIso(detail.platformFeePaidAt) else "-")
+                                    DetailMetadataRow("Payment Method", if (isPaid) "UPI" else "-")
+                                    DetailMetadataRow("Nestora platform fee", if (isPaid) "Paid" else "Pending")
+                                }
+                            }
+                        }
+
+                        // The selected package/items are a backend snapshot, so both
+                        // parties see the exact agreed scope even if the provider later
+                        // edits their catalogue.
+                        detail.serviceSelection?.takeIf { it.has("kind") }?.let { selection ->
+                            item { ServiceSelectionSnapshotCard(selection) }
                         }
 
                         // Problem / Listing Description Card (ss2 -> problemDescription/listing description)
@@ -1842,7 +1939,7 @@ fun BookingDetailScreen(
                             item {
                                 Surface(shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
                                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text("Listing Description", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NestoraTextMuted)
+                                        Text("Service Description", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NestoraTextMuted)
                                         Text(detail.problemDescription, fontSize = 13.sp, color = Color(0xFF2D3748))
                                     }
                                 }
@@ -1958,11 +2055,116 @@ private fun DetailMetadataRow(label: String, value: String) {
 }
 
 @Composable
+private fun ServiceSelectionSnapshotCard(selection: com.google.gson.JsonObject) {
+    val scope = bookingServiceSelectionPresentation(selection) ?: return
+    Surface(
+        shape = RoundedCornerShape(16.dp), color = Color.White,
+        border = BorderStroke(1.dp, Color(0xFFDFE9E4)), shadowElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(if (scope.kind == "PACKAGE") "Selected package" else "Selected work items", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
+            Text(scope.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = NestoraMint)
+            scope.description.takeIf { it.isNotBlank() }?.let {
+                Text(it, fontSize = 12.sp, color = Color(0xFF60756B))
+            }
+            if (scope.items.isNotEmpty()) {
+                DashedDivider(modifier = Modifier.padding(vertical = 2.dp))
+                scope.items.forEach { item ->
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(if (item.quantity > 1) "${item.title} × ${item.quantity}" else item.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2D3748))
+                            item.description.takeIf { it.isNotBlank() }?.let { description ->
+                                Text(description, fontSize = 11.sp, color = NestoraTextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        Text(
+                            if (scope.kind == "PACKAGE") "${item.totalDurationMinutes} min"
+                            else "₹${item.lineAmount.toInt()} · ${item.totalDurationMinutes} min",
+                            fontSize = 11.sp,
+                            color = Color(0xFF60756B)
+                        )
+                    }
+                }
+            }
+            scope.includedText.takeIf { it.isNotBlank() }?.let {
+                Text("Included: $it", fontSize = 11.sp, color = Color(0xFF486158))
+            }
+            scope.excludedText.takeIf { it.isNotBlank() }?.let {
+                Text("Not included: $it", fontSize = 11.sp, color = Color(0xFF8A4B00))
+            }
+            if (scope.providerAmount != null || scope.durationMinutes != null) {
+                DashedDivider(modifier = Modifier.padding(vertical = 2.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Provider amount after work", fontSize = 12.sp, color = Color(0xFF60756B))
+                    Text(
+                        buildString {
+                            scope.providerAmount?.let { append("₹${it.toInt()}") }
+                            scope.durationMinutes?.let { append(if (scope.providerAmount != null) " · $it min" else "$it min") }
+                        },
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15231D)
+                    )
+                }
+            }
+            Text("This selected scope is saved with the booking. The provider amount is paid directly after work; Nestora's booking fee is separate.", fontSize = 11.sp, color = NestoraTextMuted)
+        }
+    }
+}
+
+internal data class BookingSelectionItemPresentation(
+    val title: String,
+    val description: String,
+    val quantity: Int,
+    val lineAmount: Double,
+    val totalDurationMinutes: Int
+)
+
+internal data class BookingServiceSelectionPresentation(
+    val kind: String,
+    val title: String,
+    val description: String,
+    val includedText: String,
+    val excludedText: String,
+    val providerAmount: Double?,
+    val durationMinutes: Int?,
+    val items: List<BookingSelectionItemPresentation>
+)
+
+internal fun bookingServiceSelectionPresentation(selection: com.google.gson.JsonObject): BookingServiceSelectionPresentation? = runCatching {
+    val kind = selection.get("kind")?.asString?.trim()?.uppercase().orEmpty()
+    if (kind != "PACKAGE" && kind != "ITEMS") return@runCatching null
+    val packageSnapshot = selection.get("package")?.takeIf { it.isJsonObject }?.asJsonObject
+    val items = selection.get("items")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { element ->
+        val item = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        val title = item.get("title")?.asString?.trim()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        val quantity = item.get("quantity")?.asInt?.coerceAtLeast(1) ?: 1
+        BookingSelectionItemPresentation(
+            title = title,
+            description = item.get("description")?.asString?.trim().orEmpty(),
+            quantity = quantity,
+            lineAmount = (item.get("price_amount")?.asDouble ?: 0.0) * quantity,
+            totalDurationMinutes = (item.get("duration_minutes")?.asInt ?: 0) * quantity
+        )
+    }.orEmpty()
+    BookingServiceSelectionPresentation(
+        kind = kind,
+        title = if (kind == "PACKAGE") packageSnapshot?.get("name")?.asString?.trim().orEmpty().ifBlank { "Provider package" }
+            else if (items.size == 1) items.first().title else "${items.size} selected work items",
+        description = packageSnapshot?.get("description")?.asString?.trim().orEmpty(),
+        includedText = packageSnapshot?.get("included_text")?.asString?.trim().orEmpty(),
+        excludedText = packageSnapshot?.get("excluded_text")?.asString?.trim().orEmpty(),
+        providerAmount = selection.get("total_amount")?.asDouble,
+        durationMinutes = selection.get("duration_minutes")?.asInt,
+        items = items
+    )
+}.getOrNull()
+
+@Composable
 private fun WhileYouWaitCarousel() {
     val slides = listOf(
         SlideItem("IKEA Nagasandra turns 3!", "You can stand a chance to win a home makeover worth ₹10 Lacs*.", "VISIT THE STORE", "", Color(0xFFF3F4F6)),
         SlideItem("AC Service Special", "Get absolute cooling with 20% flat discount on professional washing.", "BOOK NOW", "", Color(0xFFEBF8FF)),
-        SlideItem("Deep Home Cleaning", "Let professionals make your home sparkle. Safe escrow payments.", "EXPLORE", "", Color(0xFFE6FFFA)),
+        SlideItem("Deep Home Cleaning", "Let verified professionals make your home sparkle.", "EXPLORE", "", Color(0xFFE6FFFA)),
         SlideItem("Electrical Safety Check", "Prevent short circuits. Free diagnostic check by certified technicians.", "GET CHECK", "", Color(0xFFFFFAF0))
     )
     
@@ -2077,41 +2279,24 @@ private fun WhileYouWaitCarousel() {
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Page indicator dots centered with customizable fading dots (ss1 layout)
+        // Page indicator dots showing only dot animation
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Very tiny dot (far left)
-            Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(Color(0xFFE2E8F0)))
-            Spacer(modifier = Modifier.width(6.dp))
-            // Medium dot (inner left)
-            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFCBD5E0)))
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Main understandable index pill
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF2D3748),
-                shadowElevation = 2.dp,
-                modifier = Modifier.wrapContentSize()
-            ) {
-                Text(
-                    text = "${currentPage + 1}/${slides.size}",
-                    fontSize = 11.sp, // Standard understandable size
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            slides.forEachIndexed { index, _ ->
+                val isSelected = index == currentPage
+                Box(
+                    modifier = Modifier
+                        .size(if (isSelected) 8.dp else 6.dp)
+                        .clip(CircleShape)
+                        .background(if (isSelected) Color(0xFF2D3748) else Color(0xFFCBD5E0))
                 )
+                if (index < slides.size - 1) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
             }
-
-            Spacer(modifier = Modifier.width(8.dp))
-            // Medium dot (inner right)
-            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFCBD5E0)))
-            Spacer(modifier = Modifier.width(6.dp))
-            // Very tiny dot (far right)
-            Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(Color(0xFFE2E8F0)))
         }
     }
 }
@@ -2128,9 +2313,9 @@ private data class SlideItem(
 private fun FeedbackAdCarousel() {
     val slides = listOf(
         SlideItem("Nestora Trust Badge", "Providers undergo strict KYC and face verification checks before taking on any booking.", "LEARN MORE", "🛡️", Color(0xFFF0F4FF)),
-        SlideItem("Direct Settlements", "No middleman fees on Nestora! Pay remaining amount directly offline to provider.", "EXPLORE", "🤝", Color(0xFFE6FFFA)),
-        SlideItem("Secure Escrow", "Your advance payment is held securely in escrow until service completion.", "HOW IT WORKS", "🔒", Color(0xFFEBF8FF)),
-        SlideItem("Instant Matching", "Explain your problem, and let our advanced AI matching connect you to top pros.", "TRY FINDER", "⚡", Color(0xFFFFF5F5))
+        SlideItem("Direct Settlements", "Pay the provider service amount directly after the completed work.", "EXPLORE", "", Color(0xFFE6FFFA)),
+        SlideItem("Clear Booking Fee", "Nestora collects only the booking fee shown before payment.", "HOW IT WORKS", "", Color(0xFFEBF8FF)),
+        SlideItem("Instant Matching", "Explain your problem and let Nestora match you with suitable professionals.", "TRY FINDER", "", Color(0xFFFFF5F5))
     )
     
     var currentPage by remember { mutableStateOf(0) }

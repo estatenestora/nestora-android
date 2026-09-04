@@ -35,7 +35,9 @@ fun CategoriesScreen(
     onLoadAllServiceTypes: suspend () -> List<ServiceType>,
     onServiceTypeClick: (ServiceType) -> Unit,
     onSearchClick: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    managedMedia: List<com.estatenestora.app.data.model.MediaAsset> = emptyList(),
+    onResolveMedia: suspend (String) -> String? = { null }
 ) {
     var allServiceTypes by remember { mutableStateOf<List<ServiceType>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
@@ -169,12 +171,16 @@ fun CategoriesScreen(
                     }
                 } else {
                     filteredList.forEachIndexed { index, (category, services) ->
+                        val categoryAsset = managedMedia.firstOrNull { it.scope == "CATEGORY" && it.scopeId == category.backendId }
+                        val categoryFileId = remember(categoryAsset?.id) { categoryAsset?.fileIdFor("THUMBNAIL") }
+                        var categoryImage by remember(categoryFileId) { mutableStateOf<String?>(null) }
+                        LaunchedEffect(categoryFileId) { categoryImage = categoryFileId?.let { onResolveMedia(it) } }
                         // Divider between sections (not before the first)
                         if (index > 0) {
                             HorizontalDivider(
-                                modifier = Modifier.padding(horizontal = 20.dp),
-                                thickness = 0.8.dp,
-                                color = Color(0xFFEEEEEE)
+                                color = Color(0xFFEDEDED),
+                                thickness = 1.dp,
+                                modifier = Modifier.padding(horizontal = 20.dp)
                             )
                         }
 
@@ -184,13 +190,13 @@ fun CategoriesScreen(
                                 .padding(top = 18.dp, bottom = 20.dp)
                         ) {
                             // Bold category title
-                            Text(
-                                text = category.name,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF0D1A13),
-                                modifier = Modifier.padding(horizontal = 20.dp)
-                            )
+                            Row(modifier = Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (!categoryImage.isNullOrBlank()) {
+                                    AsyncImage(categoryImage, category.name, Modifier.size(38.dp).clip(RoundedCornerShape(9.dp)), contentScale = ContentScale.Crop)
+                                    Spacer(Modifier.width(10.dp))
+                                }
+                                Text(text = category.name, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0D1A13))
+                            }
 
                             Spacer(Modifier.height(14.dp))
 
@@ -221,7 +227,9 @@ fun CategoriesScreen(
                                             label = svc.name,
                                             imageUrl = getRealLifeImageUrl(svc.slug.ifBlank { svc.name }),
                                             onClick = { onServiceTypeClick(svc) },
-                                            imageSize = 76.dp
+                                            imageSize = 76.dp,
+                                            managedMedia = managedMedia.firstOrNull { it.scope == "SERVICE_TYPE" && it.scopeId == svc.backendId },
+                                            onResolveMedia = onResolveMedia
                                         )
                                     }
                                     Spacer(Modifier.width(6.dp))

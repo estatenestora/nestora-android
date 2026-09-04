@@ -322,12 +322,16 @@ fun HomeScreen(
     tabsList: List<com.estatenestora.app.ui.theme.NestoraTab> = emptyList(),
     selectedTabId: String = "explore",
     onTabSelected: (String) -> Unit = {},
+    cartItemCount: Int = 0,
+    onCartClick: () -> Unit = {},
     currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday(),
     isLoadingFeed: Boolean = false,
     onRefreshFeed: () -> Unit = {},
     recentlyViewedServices: List<com.estatenestora.app.data.model.ServiceType> = emptyList(),
     allServiceTypes: List<com.estatenestora.app.data.model.ServiceType> = emptyList(),
-    onServiceTypeClick: (com.estatenestora.app.data.model.ServiceType) -> Unit = {}
+    onServiceTypeClick: (com.estatenestora.app.data.model.ServiceType) -> Unit = {},
+    managedBanners: List<com.estatenestora.app.data.model.MediaAsset> = emptyList(),
+    onResolveMedia: suspend (String) -> String? = { null }
 ) {
     val pageSurface = remember(currentTheme) { selectedMenuSurface(currentTheme) }
     var isSearchFocused by remember { mutableStateOf(false) }
@@ -375,38 +379,47 @@ fun HomeScreen(
         ) {
             // ── TOP HEADER (Dark Teal-Green Gradient matching Swiggy Layout) ────
             item {
-                OnboardingTopBar(
-                    currentLocation = currentLocation,
-                    onSelectLocationClick = onSelectLocationClick,
-                    onProfileClick = onProfileClick,
-                    userPhotoPath = userPhotoPath,
-                    isProviderMode = isProviderMode,
-                    onModeToggle = onModeToggle,
-                    tabsList = tabsList,
-                    selectedTabId = selectedTabId,
-                    onTabSelected = onTabSelected,
-                    currentTheme = currentTheme
-                )
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    HeroCarousel(
+                        theme = "explore",
+                        canvasColor = Color.Transparent,
+                        carouselHeight = standardTopHeroHeight(),
+                        horizontalPadding = 0.dp,
+                        verticalPadding = 0.dp,
+                        cornerRadius = 0.dp,
+                        managedBanners = managedBanners,
+                        onResolveMedia = onResolveMedia
+                    )
+                    OnboardingTopBar(
+                        currentLocation = currentLocation,
+                        onSelectLocationClick = onSelectLocationClick,
+                        onProfileClick = onProfileClick,
+                        userPhotoPath = userPhotoPath,
+                        isProviderMode = isProviderMode,
+                        onModeToggle = onModeToggle,
+                        tabsList = tabsList,
+                        selectedTabId = selectedTabId,
+                        onTabSelected = onTabSelected,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                        transparentBackground = true,
+                        currentTheme = currentTheme
+                    )
+                }
             }
 
-        if (!isSearchFocused) {
-            stickyHeader {
-                OnboardingSearchBar(
-                    searchQuery = searchQuery,
-                    onSearchQueryChange = { searchQuery = it },
-                    isScrolled = isScrolled,
-                    hasCarouselBelow = true,
-                    onClick = { isSearchFocused = true },
-                    currentTheme = currentTheme
-                )
-            }
+        stickyHeader {
+            OnboardingSearchBar(
+                searchQuery = searchQuery,
+                onSearchQueryChange = { searchQuery = it },
+                isScrolled = isScrolled,
+                hasCarouselBelow = true,
+                cartItemCount = cartItemCount,
+                onCartClick = onCartClick,
+                currentTheme = currentTheme
+            )
         }
 
         // ── SWIGGY-STYLE INTEGRATED HERO CAROUSEL ────────────────────────────
-        item {
-            HeroCarousel(theme = "explore", canvasColor = pageSurface)
-        }
-
         // ── POPULAR SERVICES CAROUSEL ─────────────────────────────────────────
         item {
             Column(
@@ -478,6 +491,8 @@ fun HomeScreen(
                             SwiggyStyleCard(
                                 label = svc.name,
                                 imageUrl = svc.slug.ifBlank { svc.name },
+                                managedMedia = managedBanners.firstOrNull { it.scope == "SERVICE_TYPE" && it.scopeId == svc.backendId },
+                                onResolveMedia = onResolveMedia,
                                 onClick = { onServiceTypeClick(svc) }
                             )
                         }
@@ -514,6 +529,8 @@ fun HomeScreen(
                             SwiggyStyleCard(
                                 label = svc.name,
                                 imageUrl = svc.slug.ifBlank { svc.name },
+                                managedMedia = managedBanners.firstOrNull { it.scope == "SERVICE_TYPE" && it.scopeId == svc.backendId },
+                                onResolveMedia = onResolveMedia,
                                 onClick = { onServiceTypeClick(svc) }
                             )
                         }
@@ -833,11 +850,16 @@ fun SwiggyStyleCard(
     label: String,
     imageUrl: String,
     onClick: () -> Unit,
-    imageSize: androidx.compose.ui.unit.Dp = 80.dp
+    imageSize: androidx.compose.ui.unit.Dp = 80.dp,
+    managedMedia: com.estatenestora.app.data.model.MediaAsset? = null,
+    onResolveMedia: suspend (String) -> String? = { null }
 ) {
-    val model = remember(imageUrl, label) {
+    val fallbackModel = remember(imageUrl, label) {
         getRealLifeImageModel(if (imageUrl.isNotBlank()) imageUrl else label)
     }
+    val managedFileId = remember(managedMedia?.id) { managedMedia?.fileIdFor("THUMBNAIL") }
+    var managedPath by remember(managedFileId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(managedFileId) { managedPath = managedFileId?.let { onResolveMedia(it) } }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -852,7 +874,7 @@ fun SwiggyStyleCard(
                 .border(1.dp, Color(0xFFEEEEEE), RoundedCornerShape(12.dp))
         ) {
             AsyncImage(
-                model = model,
+                model = managedPath ?: fallbackModel,
                 contentDescription = label,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -945,7 +967,7 @@ fun MarketplaceListingCard(
 
             Spacer(Modifier.height(14.dp))
 
-            HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp)
+            HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
 
             Spacer(Modifier.height(12.dp))
 

@@ -67,13 +67,15 @@ fun RegisterServiceScreen(
     categories: List<Category>,
     onFetchServiceTypes: suspend (categorySlug: String) -> List<ServiceType>,
     onFetchAllServiceTypes: suspend () -> List<ServiceType>,
-    onFetchServiceAttributes: suspend (serviceTypeSlug: String) -> List<ServiceAttributeTemplate>,
     onSubmit: suspend (
         categorySlug: String,
         serviceTypeSlug: String,
         basePrice: Double,
         locationDisplayName: String,
         city: String,
+        latitude: Double,
+        longitude: Double,
+        serviceName: String,
         description: String,
         collectedAttributes: Map<String, String>
     ) -> AndroidBridgeResponse?,
@@ -84,13 +86,10 @@ fun RegisterServiceScreen(
     val scope = rememberCoroutineScope()
 
     // ── Basic form state ─────────────────────────────────────────────────────
-    var serviceName by remember { mutableStateOf("") }
-    var priceRate by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
     var selectedLat by remember { mutableStateOf(0.0) }
     var selectedLon by remember { mutableStateOf(0.0) }
     var showLocationPicker by remember { mutableStateOf(false) }
-    var description by remember { mutableStateOf("") }
 
     // ── Category / service-type selection sheets ─────────────────────────────
     var showCategorySheet by remember { mutableStateOf(false) }
@@ -141,16 +140,12 @@ fun RegisterServiceScreen(
         }
     }
 
-    // ── Fetch attributes when service type changes ───────────────────────────
+    // Registration is intentionally limited to service type and service location.
+    // Work-item and package editors own the service details, attributes, and prices.
     LaunchedEffect(selectedServiceType) {
-        val st = selectedServiceType
         dynamicAttributes = emptyList()
         collectedValues.clear()
-        if (st != null) {
-            loadingAttributes = true
-            dynamicAttributes = onFetchServiceAttributes(st.slug)
-            loadingAttributes = false
-        }
+        loadingAttributes = false
     }
 
     // ── Location picker overlay ──────────────────────────────────────────────
@@ -287,6 +282,8 @@ fun RegisterServiceScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 24.dp)
+                .navigationBarsPadding()
+                .imePadding()
         ) {
             // Header
             item {
@@ -302,8 +299,8 @@ fun RegisterServiceScreen(
                     Spacer(Modifier.width(12.dp))
                     Text(
                         text = "Register Your Service",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
                         color = Color(0xFF0D1A13)
                     )
                 }
@@ -314,36 +311,11 @@ fun RegisterServiceScreen(
                     modifier = Modifier.padding(bottom = 24.dp),
                     lineHeight = 20.sp
                 )
+                HorizontalDivider(color = Color(0xFFE8ECEA), thickness = 1.dp)
+                Spacer(Modifier.height(20.dp))
             }
 
-            // ── 1. Business / Service Name ──────────────────────────────────
-            item {
-                SectionLabel("Basic Information")
-                Spacer(Modifier.height(12.dp))
-            }
-
-            item {
-                FormFieldWrapper(hint = "Provide your brand name or business moniker.") {
-                    OutlinedTextField(
-                        value = serviceName,
-                        onValueChange = { serviceName = it },
-                        label = { Text("Business / Service Name") },
-                        placeholder = { Text("e.g. Apex Electricals") },
-                        leadingIcon = { Icon(Icons.Default.Build, contentDescription = null, tint = mintColor) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Words,
-                            imeAction = ImeAction.Next
-                        ),
-                        shape = fieldShape,
-                        colors = fieldColors,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-            }
-
-            // ── 2. Category ─────────────────────────────────────────────────
+            // ── 1. Category ─────────────────────────────────────────────────
             item {
                 FormFieldWrapper(hint = "Select the general industry of your service.") {
                     Box(modifier = Modifier.fillMaxWidth()) {
@@ -668,52 +640,9 @@ fun RegisterServiceScreen(
                 }
             }
 
-            // ── Common fields separator ─────────────────────────────────────
-            if (dynamicAttributes.isNotEmpty()) {
-                item {
-                    Spacer(Modifier.height(4.dp))
-                    SectionLabel("Pricing & Location")
-                    Spacer(Modifier.height(12.dp))
-                }
-            } else {
-                item { Spacer(Modifier.height(4.dp)) }
-            }
+            item { Spacer(Modifier.height(4.dp)) }
 
-            // ── 4. Starting Price ───────────────────────────────────────────
-            item {
-                FormFieldWrapper(hint = "Leave empty or enter your base consultation/service rate.") {
-                    OutlinedTextField(
-                        value = priceRate,
-                        onValueChange = { priceRate = it },
-                        label = { Text("Starting Price (₹) — optional") },
-                        placeholder = { Text("e.g. 500") },
-                        leadingIcon = {
-                            Box(
-                                modifier = Modifier.padding(start = 12.dp, end = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "₹",
-                                    color = mintColor,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
-                            }
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Next
-                        ),
-                        shape = fieldShape,
-                        colors = fieldColors,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-            }
-
-            // ── 5. Address (Map picker) ─────────────────────────────────────
+            // ── 3. Address (Map picker) ─────────────────────────────────────
             item {
                 FormFieldWrapper(hint = "Select your service location on the map.") {
                     Box(
@@ -748,32 +677,6 @@ fun RegisterServiceScreen(
                 Spacer(Modifier.height(16.dp))
             }
 
-            // ── 6. Description ──────────────────────────────────────────────
-            item {
-                if (dynamicAttributes.isEmpty()) {
-                    SectionLabel("Description")
-                    Spacer(Modifier.height(12.dp))
-                }
-                FormFieldWrapper(hint = "Detail your services, timings, experience, and what you offer (min 10 characters).") {
-                    OutlinedTextField(
-                        value = description,
-                        onValueChange = { description = it },
-                        label = { Text("Short Description") },
-                        placeholder = { Text("Describe the services you offer...") },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = mintColor) },
-                        shape = fieldShape,
-                        minLines = 3,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Sentences,
-                            imeAction = ImeAction.Done
-                        ),
-                        colors = fieldColors,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Spacer(Modifier.height(24.dp))
-            }
-
             // ── Error message ───────────────────────────────────────────────
             if (errorMessage != null) {
                 item {
@@ -799,29 +702,16 @@ fun RegisterServiceScreen(
                     onClick = {
                         val cat = selectedCategory
                         val st = selectedServiceType
-                        val parsedPrice = priceRate.trim().toDoubleOrNull()
-
-                        // Validate required attributes
-                        val missingRequired = dynamicAttributes.filter { attr ->
-                            attr.isRequired && (collectedValues[attr.key].isNullOrBlank() ||
-                                (attr.inputType == "boolean" && collectedValues[attr.key].isNullOrBlank()))
-                        }
 
                         when {
-                            serviceName.trim().length < 3 ->
-                                errorMessage = "Business name must be at least 3 characters."
                             cat == null ->
                                 errorMessage = "Please select a category."
                             st == null ->
                                 errorMessage = "Please select a service type."
-                            priceRate.trim().isNotEmpty() && (parsedPrice == null || parsedPrice <= 0.0) ->
-                                errorMessage = "Please enter a valid positive number for the starting price."
                             address.isBlank() ->
                                 errorMessage = "Please select your address on the map."
-                            description.trim().length < 10 ->
-                                errorMessage = "Please write a short description (min 10 characters)."
-                            missingRequired.isNotEmpty() ->
-                                errorMessage = "Please fill in: ${missingRequired.joinToString(", ") { it.displayLabel }}"
+                            selectedLat == 0.0 && selectedLon == 0.0 ->
+                                errorMessage = "Please confirm your service location on the map."
                             else -> {
                                 errorMessage = null
                                 isSubmitting = true
@@ -839,17 +729,17 @@ fun RegisterServiceScreen(
                                     }
                                     if (extractedCity.isBlank()) extractedCity = parts.firstOrNull() ?: ""
 
-                                    // Build collected attributes map (omit empty values)
-                                    val attrs = collectedValues.filter { (_, v) -> v.isNotBlank() }
-
                                     val response = onSubmit(
                                         cat.id,
                                         st.slug,
-                                        parsedPrice ?: 0.0,
+                                        0.0,
                                         address.trim(),
                                         extractedCity,
-                                        description.trim(),
-                                        attrs
+                                        selectedLat,
+                                        selectedLon,
+                                        "",
+                                        "",
+                                        emptyMap()
                                     )
                                     isSubmitting = false
                                     if (response != null && response.ok) {
@@ -982,20 +872,18 @@ fun <T> SelectionBottomSheet(
     onDismissRequest: () -> Unit,
     grouping: ((T) -> String)? = null
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var searchQuery by remember { mutableStateOf("") }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
-        sheetState = sheetState,
-        containerColor = Color.White,
-        dragHandle = null
+    FullScreenModalSheet(
+        title = title,
+        onDismissRequest = onDismissRequest
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight()
                 .navigationBarsPadding()
+                .imePadding()
         ) {
             // Sticky Header & Search
             Column(
@@ -1004,41 +892,6 @@ fun <T> SelectionBottomSheet(
                     .background(Color.White)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                // Drag handle
-                Box(
-                    modifier = Modifier
-                        .width(36.dp)
-                        .height(4.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFE2E8F0))
-                        .align(Alignment.CenterHorizontally)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = title,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0D1A13)
-                    )
-                    IconButton(
-                        onClick = onDismissRequest,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = Color(0xFF0D1A13)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-
                 // Sticky Search Field with Magnifying glass icon placeholder
                 val focusRequester = remember { FocusRequester() }
 
@@ -1066,7 +919,7 @@ fun <T> SelectionBottomSheet(
                 )
             }
 
-            HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+            HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
 
             // Inner List Body (Scrollable and filtered entirely in client memory matching search text)
             val filteredItems = remember(searchQuery, items) {

@@ -1,6 +1,9 @@
 package com.estatenestora.app.ui.screens
 
 import com.estatenestora.app.data.model.AvailabilitySlot
+import com.estatenestora.app.data.model.BookingSummary
+import com.estatenestora.app.ui.components.providerMarkerRotation
+import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -33,6 +36,38 @@ class BookingFlowRulesTest {
         assertTrue(shouldShowProviderInbox(false, 1))
         assertTrue(shouldShowProviderInbox(true, 0))
         assertFalse(shouldShowProviderInbox(false, 0))
+    }
+
+    @Test
+    fun `server viewer role keeps sent and received visible when profile id is unavailable`() {
+        val received = testBooking(viewerRole = "PROVIDER")
+        val sent = testBooking(viewerRole = "CUSTOMER")
+
+        assertTrue(bookingBelongsToSelectedRole(received, viewerUserId = "telegram-id", isProviderMode = true))
+        assertFalse(bookingBelongsToSelectedRole(received, viewerUserId = "telegram-id", isProviderMode = false))
+        assertTrue(bookingBelongsToSelectedRole(sent, viewerUserId = "telegram-id", isProviderMode = false))
+        assertFalse(bookingBelongsToSelectedRole(sent, viewerUserId = "telegram-id", isProviderMode = true))
+    }
+
+    @Test
+    fun `old cached booking falls back to matching profile uuid`() {
+        val booking = testBooking(viewerRole = "")
+
+        assertTrue(bookingBelongsToSelectedRole(booking, viewerUserId = "provider-uuid", isProviderMode = true))
+        assertFalse(bookingBelongsToSelectedRole(booking, viewerUserId = "customer-uuid", isProviderMode = true))
+    }
+
+    @Test
+    fun `booking stats distinguish cancellation from other ended statuses`() {
+        val cancelled = testBooking(viewerRole = "CUSTOMER").copy(status = "CANCELLED", stage = "ENDED")
+        val rejected = testBooking(viewerRole = "CUSTOMER").copy(status = "REJECTED", stage = "ENDED")
+        val closed = testBooking(viewerRole = "CUSTOMER").copy(id = "closed", status = "CLOSED", stage = "DONE")
+        val confirmed = testBooking(viewerRole = "CUSTOMER").copy(id = "confirmed", status = "CONFIRMED", stage = "ACCEPTED")
+
+        assertEquals(4, bookingStatsForRole(listOf(cancelled, rejected, closed, confirmed)).total)
+        assertEquals(1, bookingStatsForRole(listOf(cancelled, rejected, closed, confirmed)).active)
+        assertEquals(1, bookingStatsForRole(listOf(cancelled, rejected, closed, confirmed)).completed)
+        assertEquals(1, bookingStatsForRole(listOf(cancelled, rejected, closed, confirmed)).cancelled)
     }
 
     @Test
@@ -199,5 +234,64 @@ class BookingFlowRulesTest {
         assertEquals("0.0", formatListingRating(-1.5f))
         assertEquals("5.0", formatListingRating(6.2f))
     }
+
+    @Test
+    fun `scheduled booking blocks live travel until thirty minutes before service`() {
+        val now = Instant.parse("2026-08-26T10:00:00Z")
+        val future = liveTravelEligibility("2026-08-28T10:00:00Z", now)
+        val nearStart = liveTravelEligibility("2026-08-26T10:20:00Z", now)
+        val asap = liveTravelEligibility(null, now)
+
+        assertFalse(future.allowed)
+        assertTrue(future.unavailableMessage.orEmpty().contains("Your appointment is on"))
+        assertTrue(future.unavailableMessage.orEmpty().contains("GPS Tracking will be available from"))
+        assertTrue(nearStart.allowed)
+        assertTrue(asap.allowed)
+    }
+
+    @Test
+    fun `travel start rejects a simulator position far from the service address`() {
+        val simulator = providerTravelLocationEligibility(
+            providerLatitude = 37.4219983,
+            providerLongitude = -122.084,
+            customerLatitude = 22.570428,
+            customerLongitude = 88.509248
+        )
+        val nearby = providerTravelLocationEligibility(
+            providerLatitude = 22.571,
+            providerLongitude = 88.51,
+            customerLatitude = 22.570428,
+            customerLongitude = 88.509248
+        )
+
+        assertFalse(simulator.allowed)
+        assertTrue(simulator.unavailableMessage.orEmpty().contains("far from this service address"))
+        assertTrue(nearby.allowed)
+    }
+
+    @Test
+    fun `live provider marker keeps a north-facing direction rotation`() {
+        assertEquals(0f, providerMarkerRotation(0f), 0f)
+        assertEquals(90f, providerMarkerRotation(90f), 0f)
+        assertEquals(270f, providerMarkerRotation(-90f), 0f)
+        assertEquals(0f, providerMarkerRotation(360f), 0f)
+    }
+
+    private fun testBooking(viewerRole: String) = BookingSummary(
+        id = "booking-id",
+        referenceCode = "B-TEST",
+        listingId = "listing-id",
+        listingTitle = "Plumber",
+        customerUserId = "customer-uuid",
+        customerName = "Customer",
+        providerUserId = "provider-uuid",
+        providerName = "Provider",
+        viewerRole = viewerRole,
+        status = "REQUESTED",
+        stage = "REQUESTED",
+        stageLabel = "Requested",
+        serviceFee = 49.0,
+        updatedAt = "2026-08-26T00:00:00Z"
+    )
 }
 

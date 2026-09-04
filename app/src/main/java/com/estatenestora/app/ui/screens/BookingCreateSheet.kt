@@ -2,7 +2,9 @@ package com.estatenestora.app.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,7 +33,6 @@ fun BookingCreateSheet(
     onBookingCreated: (String) -> Unit,
     onChangeLocationClick: () -> Unit = {}
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var quote by remember { mutableStateOf<BookingQuote?>(null) }
     var isLoadingQuote by remember { mutableStateOf(true) }
     var isCreating by remember { mutableStateOf(false) }
@@ -58,14 +59,14 @@ fun BookingCreateSheet(
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Color.White
+    FullScreenModalSheet(
+        title = "Book service",
+        onDismissRequest = onDismiss
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 28.dp)
         ) {

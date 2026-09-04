@@ -1,5 +1,7 @@
 package com.estatenestora.app.ui.screens
 
+import com.estatenestora.app.data.model.BookingSummary
+
 /** Coordinates supplied to a booking sheet. A pair is always kept together. */
 internal data class BookingCoordinates(val latitude: Double, val longitude: Double)
 
@@ -24,6 +26,113 @@ private fun isUsableCoordinatePair(latitude: Double?, longitude: Double?): Boole
 /** A received booking is authoritative even while the profile hint is stale. */
 internal fun shouldShowProviderInbox(hasProviderListings: Boolean, receivedBookingCount: Int): Boolean =
     hasProviderListings || receivedBookingCount > 0
+
+/**
+ * The server tags every GET_MY_BOOKINGS row with the authenticated viewer's
+ * role. Use that tag first so Sent/Received never depends on a separate
+ * profile request. Older cached responses fall back to the UUID comparison.
+ */
+internal fun bookingBelongsToSelectedRole(
+    booking: BookingSummary,
+    viewerUserId: String?,
+    isProviderMode: Boolean
+): Boolean = when (booking.viewerRole.uppercase()) {
+    "PROVIDER" -> isProviderMode
+    "CUSTOMER" -> !isProviderMode
+    else -> if (isProviderMode) booking.providerUserId == viewerUserId else booking.customerUserId == viewerUserId
+}
+
+internal data class BookingStats(
+    val total: Int,
+    val active: Int,
+    val completed: Int,
+    val cancelled: Int
+)
+
+private const val PROVIDER_TRAVEL_EARLY_START_MINUTES = 30L
+private const val MAXIMUM_TRAVEL_START_DISTANCE_METERS = 250_000.0
+
+/**
+ * A scheduled service is not a live trip.  GPS sharing and ETA become useful
+ * only shortly before the agreed service time; before then they can publish a
+ * provider's unrelated current location and make a future job look broken.
+ */
+internal data class LiveTravelEligibility(val allowed: Boolean, val unavailableMessage: String? = null)
+
+internal fun liveTravelEligibility(
+    scheduledStartAt: String?,
+    now: java.time.Instant = java.time.Instant.now()
+): LiveTravelEligibility {
+    if (scheduledStartAt.isNullOrBlank()) return LiveTravelEligibility(allowed = true)
+    val scheduledStart = try {
+        java.time.OffsetDateTime.parse(scheduledStartAt).toInstant()
+    } catch (_: Exception) {
+        // The backend is authoritative and still rejects an invalid attempt.
+        return LiveTravelEligibility(allowed = true)
+    }
+    val opensAt = scheduledStart.minusSeconds(PROVIDER_TRAVEL_EARLY_START_MINUTES * 60)
+    if (!now.isBefore(opensAt)) return LiveTravelEligibility(allowed = true)
+
+    val localStart = scheduledStart.atZone(java.time.ZoneId.systemDefault())
+    val readableStart = java.time.format.DateTimeFormatter
+        .ofPattern("EEEE, d MMMM 'at' h:mm a", java.util.Locale.getDefault())
+        .format(localStart)
+    val readableOpenTime = java.time.format.DateTimeFormatter
+        .ofPattern("h:mm a", java.util.Locale.getDefault())
+        .format(opensAt.atZone(java.time.ZoneId.systemDefault()))
+    return LiveTravelEligibility(
+        allowed = false,
+        unavailableMessage = "Your appointment is on $readableStart. GPS Tracking will be available from $readableOpenTime."
+    )
+}
+
+/**
+ * Stops a simulator/default GPS position on another continent before it is
+ * submitted. The backend enforces the same 250 km safety boundary.
+ */
+internal fun providerTravelLocationEligibility(
+    providerLatitude: Double,
+    providerLongitude: Double,
+    customerLatitude: Double?,
+    customerLongitude: Double?
+): LiveTravelEligibility {
+    if (!isUsableCoordinatePair(customerLatitude, customerLongitude)) return LiveTravelEligibility(allowed = true)
+    if (!isUsableCoordinatePair(providerLatitude, providerLongitude)) {
+        return LiveTravelEligibility(false, "Nestora could not verify your current GPS location. Check device location and try again.")
+    }
+    val distanceMeters = haversineDistanceMeters(
+        providerLatitude,
+        providerLongitude,
+        customerLatitude!!,
+        customerLongitude!!
+    )
+    return if (distanceMeters > MAXIMUM_TRAVEL_START_DISTANCE_METERS) {
+        LiveTravelEligibility(
+            false,
+            "Your GPS location is far from this service address. Check your device location before starting travel."
+        )
+    } else {
+        LiveTravelEligibility(allowed = true)
+    }
+}
+
+private fun haversineDistanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val earthRadiusMeters = 6_371_000.0
+    val latitudeDelta = Math.toRadians(lat2 - lat1)
+    val longitudeDelta = Math.toRadians(lon2 - lon1)
+    val a = kotlin.math.sin(latitudeDelta / 2).let { it * it } +
+        kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+        kotlin.math.sin(longitudeDelta / 2).let { it * it }
+    return 2 * earthRadiusMeters * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+}
+
+/** Stats must use raw statuses: the display ENDED stage also contains rejects and expiries. */
+internal fun bookingStatsForRole(bookings: List<BookingSummary>): BookingStats = BookingStats(
+    total = bookings.size,
+    active = bookings.count { it.stage !in setOf("DONE", "ENDED") },
+    completed = bookings.count { it.status.uppercase() in setOf("COMPLETED", "CLOSED", "PAID") },
+    cancelled = bookings.count { it.status.uppercase() == "CANCELLED" }
+)
 
 /** Background list polling is needed only when its data is on screen. */
 internal fun shouldRunBookingListPolling(isAuthenticated: Boolean, activeScreen: String, selectedTab: Int): Boolean =

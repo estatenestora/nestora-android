@@ -85,11 +85,11 @@ data class NestoraTab(
  * Thread-safe Theme Matrix mapping Day-of-Week index to Royal Theme profiles.
  */
 object RoyalThemeRepository {
-    /** The original Nestora colour scheme, used unless dynamic theming is enabled. */
+    /** The production Nestora colour scheme, used unless dynamic preview theming is enabled. */
     val legacyMintTheme = RoyalTheme(
         name = "Nestora Mint",
-        backgroundGradient = listOf(Color(0xFF00382B), Color(0xFF00382B)),
-        activeTabCardBg = Color.White,
+        backgroundGradient = listOf(Color(0xFF064E3B), Color(0xFF0F766E)),
+        activeTabCardBg = Color(0xFFE7F3EE),
         inactiveTabCardBg = Color(0x1FFFFFFF),
         searchBarAlphaTint = Color(0x0A000000)
     )

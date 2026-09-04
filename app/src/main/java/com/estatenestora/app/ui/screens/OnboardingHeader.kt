@@ -2,9 +2,11 @@ package com.estatenestora.app.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,6 +15,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ShoppingCart
 import coil.compose.AsyncImage
 import java.io.File
 import androidx.compose.material.icons.filled.Settings
@@ -27,8 +30,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Brush
@@ -40,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,6 +64,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
+import kotlinx.coroutines.delay
 
 @Composable
 fun MicIcon(color: Color, modifier: Modifier = Modifier) {
@@ -226,15 +234,34 @@ fun OnboardingTopBar(
     selectedTabId: String,
     onTabSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
+    showPrimaryNavigationTabs: Boolean = false,
+    transparentBackground: Boolean = false,
     currentTheme: RoyalTheme = remember { RoyalThemeRepository.getThemeForToday() }
 ) {
+    val headerView = LocalView.current
+    if (transparentBackground) {
+        SideEffect {
+            val window = (headerView.context as? android.app.Activity)?.window ?: return@SideEffect
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            WindowCompat.getInsetsController(window, headerView).isAppearanceLightStatusBars = false
+        }
+        DisposableEffect(headerView) {
+            onDispose {
+                val window = (headerView.context as? android.app.Activity)?.window ?: return@onDispose
+                WindowCompat.getInsetsController(window, headerView).isAppearanceLightStatusBars = true
+            }
+        }
+    }
     Box(
         modifier = modifier
             .fillMaxWidth()
             // Header, status area and resting search container deliberately
             // share one base color. A separate gradient in each composable
             // creates visible stripes where those sections meet.
-            .background(currentTheme.backgroundGradient.first())
+            .background(
+                if (transparentBackground) Color.Transparent
+                else currentTheme.backgroundGradient.first()
+            )
             .statusBarsPadding()
             .padding(top = 8.dp, bottom = 0.dp)
     ) {
@@ -302,38 +329,35 @@ fun OnboardingTopBar(
 
                 Spacer(Modifier.width(8.dp))
 
-                // Global role toggle: Glassmorphic design with pulsating glow dot
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.White.copy(alpha = 0.12f))
-                        .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(10.dp))
-                        .clickable { onModeToggle() }
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                // A compact Material-style status chip remains readable over
+                // transparent carousel headers without introducing another
+                // heavy block of theme colour.
+                Surface(
+                    onClick = onModeToggle,
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White.copy(alpha = 0.94f),
+                    border = BorderStroke(1.dp, Color(0xFFD8E3DF)),
+                    shadowElevation = 2.dp
                 ) {
-                    if (isProviderMode) {
-                        Text(
-                            text = "SERVE",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(end = 4.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        modifier = Modifier.padding(start = 7.dp, end = 10.dp, top = 5.dp, bottom = 5.dp)
+                    ) {
+                        GlowingPulseIndicator(
+                            color = if (isProviderMode) Color(0xFF00A878) else Color(0xFF356AE6),
+                            modifier = Modifier.size(13.dp)
                         )
-                        GlowingPulseIndicator(color = Color(0xFF00FFB2))
-                    } else {
-                        GlowingPulseIndicator(color = Color.White)
                         Text(
-                            text = "HIRE",
-                            color = Color.White.copy(alpha = 0.9f),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(start = 4.dp)
+                            text = if (isProviderMode) "SERVE" else "HIRE",
+                            color = Color(0xFF123D32),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
 
                 // Right side: Dummy white profile icon with soft grey background (same size as Nestora Logo)
                 Box(
@@ -362,12 +386,13 @@ fun OnboardingTopBar(
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            if (showPrimaryNavigationTabs) {
+                Spacer(Modifier.height(16.dp))
 
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.BottomCenter
-            ) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
                 // 1. Draw the baseline selected-colour rail first (so it is at the very bottom and drawn underneath)
                 Box(
                     modifier = Modifier
@@ -399,6 +424,9 @@ fun OnboardingTopBar(
                         )
                     }
                 }
+                }
+            } else {
+                Spacer(Modifier.height(8.dp))
             }
         }
     }
@@ -439,7 +467,7 @@ fun MenuTabCard(
     )
 
     val contentColor by animateColorAsState(
-        targetValue = Color.White.copy(alpha = if (isActive) 1f else 0.95f),
+        targetValue = Color.White.copy(alpha = if (isActive) 1f else 0.68f),
         animationSpec = tween(durationMillis = 250),
         label = "TabTextColorAnimation"
     )
@@ -450,16 +478,26 @@ fun MenuTabCard(
             .scale(scaleFactor)
             .height(
                 when {
-                    isActive && compact -> 62.dp
-                    isActive -> 66.dp
-                    compact -> 60.dp
+                    isActive && compact -> 64.dp
+                    isActive -> 68.dp
+                    compact -> 62.dp
                     else -> 64.dp
                 }
             )
+            .shadow(if (isActive) 2.dp else 0.dp, tabShape, clip = false)
             .clip(tabShape)
             .background(cardBgColor)
+            .border(
+                width = if (isActive) 1.5.dp else 0.dp,
+                color = if (isActive) Color.White.copy(alpha = 0.58f) else Color.Transparent,
+                shape = tabShape
+            )
             .graphicsLayer { this.alpha = alpha }
-            .clickable { onClick() }
+            .selectable(
+                selected = isActive,
+                role = Role.Tab,
+                onClick = onClick
+            )
             .padding(vertical = if (compact) 6.dp else 8.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -468,7 +506,7 @@ fun MenuTabCard(
             text = tab.iconEmoji,
             fontSize = if (compact) 20.sp else 23.sp,
             modifier = Modifier
-                .scale(if (isActive) 1.10f else 1f)
+                .scale(if (isActive) 1.08f else 1f)
                 .offset(y = if (isActive) (-1).dp else 0.dp)
                 .padding(bottom = if (compact) 2.5.dp else 5.dp)
         )
@@ -476,10 +514,18 @@ fun MenuTabCard(
             text = tab.label.uppercase(),
             color = contentColor,
             fontSize = if (compact) 8.5.sp else 10.sp,
-            fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+            fontWeight = if (isActive) FontWeight.Black else FontWeight.Medium,
             letterSpacing = if (compact) 0.2.sp else 0.5.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .width(if (isActive) 32.dp else 20.dp)
+                .height(3.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(topMenuIndicatorColor(isActive))
         )
     }
 }
@@ -491,6 +537,8 @@ fun OnboardingSearchBar(
     isScrolled: Boolean = false,
     hasCarouselBelow: Boolean = false,
     onClick: (() -> Unit)? = null,
+    cartItemCount: Int = 0,
+    onCartClick: (() -> Unit)? = null,
     currentTheme: RoyalTheme = remember { RoyalThemeRepository.getThemeForToday() }
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -502,6 +550,7 @@ fun OnboardingSearchBar(
     // contents in the header colour preserves contrast without introducing a
     // second coloured strip below the navigation.
     val searchContentColor = currentTheme.backgroundGradient.first()
+    val searchContext = androidx.compose.ui.platform.LocalContext.current
     // Only apply status-bar top padding when the search bar is pinned to the very top of
     // the screen (isScrolled=true). When it sits below OnboardingTopBar (isScrolled=false)
     // no extra padding is needed — the top bar already occupies the status bar area.
@@ -510,8 +559,44 @@ fun OnboardingSearchBar(
     } else {
         0.dp
     }
+    val rotatingServices = remember {
+        listOf("Plumber", "Maid", "Electrician", "Broker", "Flat Owner", "Laundry")
+    }
+    var rotatingServiceIndex by remember { mutableStateOf(0) }
+    var typedServiceLength by remember { mutableStateOf(0) }
+    LaunchedEffect(rotatingServices) {
+        while (true) {
+            val currentService = rotatingServices[rotatingServiceIndex]
+            typedServiceLength = 0
+            currentService.indices.forEach {
+                delay(70)
+                typedServiceLength = it + 1
+            }
+            delay(900)
+            currentService.indices.reversed().forEach {
+                delay(38)
+                typedServiceLength = it
+            }
+            rotatingServiceIndex = (rotatingServiceIndex + 1) % rotatingServices.size
+        }
+    }
 
-    Box(
+    DisposableEffect(isScrolled, searchContext) {
+        if (!isScrolled) return@DisposableEffect onDispose {}
+        val window = (searchContext as? android.app.Activity)?.window
+        if (window == null) return@DisposableEffect onDispose {}
+        val previousColor = window.statusBarColor
+        val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        val previousLightStatusBars = insetsController.isAppearanceLightStatusBars
+        window.statusBarColor = android.graphics.Color.WHITE
+        insetsController.isAppearanceLightStatusBars = true
+        onDispose {
+            window.statusBarColor = previousColor
+            insetsController.isAppearanceLightStatusBars = previousLightStatusBars
+        }
+    }
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(if (isScrolled) Color.White else lightThemeHighlight)
@@ -521,12 +606,15 @@ fun OnboardingSearchBar(
                 bottom = if (isScrolled) 12.dp else (if (hasCarouselBelow) 8.dp else 24.dp),
                 top = statusBarTopPadding + (if (isScrolled) 8.dp else 12.dp)
             )
+        ,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth()
+                .weight(1f)
                 .height(46.dp)
-                .border(1.2.dp, Color.White, RoundedCornerShape(12.dp))
+                .border(1.dp, Color(0xFFE1E6E4), RoundedCornerShape(12.dp))
                 .clickable {
                     if (onClick != null) {
                         onClick()
@@ -547,16 +635,26 @@ fun OnboardingSearchBar(
                 Spacer(Modifier.width(8.dp))
                 Box(
                     modifier = Modifier.weight(1f),
-                    contentAlignment = if (onClick != null) Alignment.Center else Alignment.CenterStart
+                    contentAlignment = Alignment.CenterStart
                 ) {
                     if (searchQuery.isEmpty()) {
-                        Text(
-                            "Search for flats, plumbers, maids...",
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Search for ",
                                 color = searchContentColor.copy(alpha = 0.56f),
-                            fontSize = 13.sp,
-                            textAlign = if (onClick != null) TextAlign.Center else TextAlign.Start,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                                fontSize = 13.sp,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = rotatingServices[rotatingServiceIndex].take(typedServiceLength),
+                                color = searchContentColor.copy(alpha = 0.56f),
+                                fontSize = 13.sp,
+                                maxLines = 1
+                            )
+                        }
                     }
                     // A real text field consumes the first touch before the
                     // parent Surface sees it. When an active-search callback
@@ -588,6 +686,35 @@ fun OnboardingSearchBar(
                     color = searchContentColor,
                     modifier = Modifier.size(22.dp)
                 )
+            }
+        }
+        if (onCartClick != null) {
+            Surface(
+                onClick = onCartClick,
+                modifier = Modifier.size(46.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = Color.White,
+                border = BorderStroke(1.dp, Color(0xFFE1E6E4)),
+                shadowElevation = if (isScrolled) 2.dp else 0.dp
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    BadgedBox(
+                        badge = {
+                            if (cartItemCount > 0) {
+                                Badge(containerColor = Color(0xFFB42318)) {
+                                    Text(cartItemCount.coerceAtMost(99).toString())
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ShoppingCart,
+                            contentDescription = "Open cart",
+                            tint = searchContentColor,
+                            modifier = Modifier.size(23.dp)
+                        )
+                    }
+                }
             }
         }
     }

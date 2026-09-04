@@ -566,7 +566,7 @@ fun MapLocationPickerScreen(
                                             )
                                         }
                                     }
-                                    HorizontalDivider(color = Color(0xFFF2F4F5), thickness = 1.dp)
+                                    HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
                                 }
                             }
                         }

@@ -10,7 +10,8 @@ data class Category(
     val emoji: String,
     val description: String,
     val servicesCount: Int = 0,
-    @SerializedName("is_active") val isActive: Boolean = true
+    @SerializedName("is_active") val isActive: Boolean = true,
+    val backendId: String = ""
 )
 
 data class ServiceType(
@@ -19,7 +20,8 @@ data class ServiceType(
     val emoji: String,
     val description: String,
     val categorySlug: String,
-    @SerializedName("is_active") val isActive: Boolean = true
+    @SerializedName("is_active") val isActive: Boolean = true,
+    val backendId: String = ""
 )
 
 data class ServiceListing(
@@ -41,8 +43,11 @@ data class ServiceListing(
     val attributes: Map<String, String> = emptyMap(),
     val phone: String? = null,
     val isActive: Boolean = true,
+    val totalBookingCount: Int = 0,
     val openBookingCount: Int = 0,
     val requestedBookingCount: Int = 0,
+    val workItemCount: Int = 0,
+    val packageCount: Int = 0,
     val serviceRadiusKm: Int = 5,
     val tagline: String = "",
     val pricingModel: String = "",
@@ -68,12 +73,14 @@ data class BookingSummary(
     @SerializedName("customer_name") val customerName: String,
     @SerializedName("provider_user_id") val providerUserId: String,
     @SerializedName("provider_name") val providerName: String,
+    @SerializedName("viewer_role") val viewerRole: String = "",
     @SerializedName("status") val status: String,
     @SerializedName("stage") val stage: String,
     @SerializedName("stage_label") val stageLabel: String,
     @SerializedName("customer_message") val customerMessage: String = "",
     @SerializedName("provider_message") val providerMessage: String = "",
     @SerializedName("service_fee") val serviceFee: Double,
+    @SerializedName("service_scope") val serviceScope: BookingServiceScope? = null,
     @SerializedName("cancellation_fee") val cancellationFee: Double = 0.0,
     @SerializedName("is_home_service") val isHomeService: Boolean = false,
     @SerializedName("updated_at") val updatedAt: String,
@@ -81,6 +88,16 @@ data class BookingSummary(
     @SerializedName("unseen_by_provider") val unseenByProvider: Boolean = false,
     @SerializedName("customer_address") val customerAddress: String = "",
     @SerializedName("provider_address") val providerAddress: String = ""
+)
+
+/** Compact, server-derived scope for booking list cards. The full immutable
+ * package/item snapshot is still returned only by GET_BOOKING. */
+data class BookingServiceScope(
+    @SerializedName("kind") val kind: String,
+    @SerializedName("label") val label: String,
+    @SerializedName("item_count") val itemCount: Int,
+    @SerializedName("provider_amount") val providerAmount: Double,
+    @SerializedName("duration_minutes") val durationMinutes: Int
 )
 
 // Full detail shape for a single booking's tracking screen — matches the
@@ -96,18 +113,21 @@ data class BookingDetail(
     @SerializedName("customer_name") val customerName: String,
     @SerializedName("provider_user_id") val providerUserId: String,
     @SerializedName("provider_name") val providerName: String,
+    @SerializedName("viewer_role") val viewerRole: String = "",
     @SerializedName("status") val status: String,
     @SerializedName("stage") val stage: String,
     @SerializedName("stage_label") val stageLabel: String,
     @SerializedName("customer_message") val customerMessage: String = "",
     @SerializedName("provider_message") val providerMessage: String = "",
     @SerializedName("service_fee") val serviceFee: Double,
+    @SerializedName("service_scope") val serviceScope: BookingServiceScope? = null,
     @SerializedName("cancellation_fee") val cancellationFee: Double = 0.0,
     @SerializedName("is_home_service") val isHomeService: Boolean = false,
     @SerializedName("updated_at") val updatedAt: String,
     @SerializedName("unseen_by_customer") val unseenByCustomer: Boolean = false,
     @SerializedName("unseen_by_provider") val unseenByProvider: Boolean = false,
     @SerializedName("problem_description") val problemDescription: String = "",
+    @SerializedName("service_selection") val serviceSelection: com.google.gson.JsonObject? = null,
     @SerializedName("customer_address") val customerAddress: String = "",
     @SerializedName("customer_latitude") val customerLatitude: Double? = null,
     @SerializedName("customer_longitude") val customerLongitude: Double? = null,
@@ -135,6 +155,10 @@ data class BookingDetail(
     @SerializedName("commuting_fee") val commutingFee: Double = 0.0,
     @SerializedName("advance_amount") val advanceAmount: Double? = null,
     @SerializedName("advance_commission_pct") val advanceCommissionPct: Double? = null,
+    @SerializedName("platform_fee_amount") val platformFeeAmount: Double = 0.0,
+    @SerializedName("platform_gst_amount") val platformGstAmount: Double = 0.0,
+    @SerializedName("platform_fee_kind") val platformFeeKind: String = "",
+    @SerializedName("platform_fee_paid_at") val platformFeePaidAt: String? = null,
     @SerializedName("remaining_amount") val remainingAmount: Double = 0.0,
     @SerializedName("has_reviewed") val hasReviewed: Boolean = false,
     @SerializedName("customer_phone") val customerPhone: String = "",
@@ -143,14 +167,18 @@ data class BookingDetail(
     @SerializedName("visit_kind") val visitKind: String = "SERVICE",
     @SerializedName("engagement_id") val engagementId: String = "",
     @SerializedName("requires_provider_quote") val requiresProviderQuote: Boolean = false,
-    @SerializedName("request_answers") val requestAnswers: Map<String, String> = emptyMap()
+    @SerializedName("request_answers") val requestAnswers: Map<String, String> = emptyMap(),
+    @SerializedName("cancellation_payment_payer_user_id") val cancellationPaymentPayerUserId: String = "",
+    @SerializedName("cancellation_payment_payee_user_id") val cancellationPaymentPayeeUserId: String = "",
+    @SerializedName("cancellation_payment_state") val cancellationPaymentState: String = ""
 ) {
     fun toSummary(): BookingSummary = BookingSummary(
         id = id, referenceCode = referenceCode, listingId = listingId, listingTitle = listingTitle,
         customerUserId = customerUserId, customerName = customerName,
         providerUserId = providerUserId, providerName = providerName,
+        viewerRole = viewerRole,
         status = status, stage = stage, stageLabel = stageLabel, customerMessage = customerMessage, providerMessage = providerMessage,
-        serviceFee = serviceFee, cancellationFee = cancellationFee, isHomeService = isHomeService,
+        serviceFee = serviceFee, serviceScope = serviceScope, cancellationFee = cancellationFee, isHomeService = isHomeService,
         updatedAt = updatedAt, unseenByCustomer = unseenByCustomer, unseenByProvider = unseenByProvider
     )
 }
@@ -170,6 +198,12 @@ data class PaymentInfo(
     @SerializedName("currency") val currency: String,
     @SerializedName("txn_ref") val txnRef: String,
     @SerializedName("note") val note: String,
+    @SerializedName("platform_fee_amount") val platformFeeAmount: Double = 0.0,
+    @SerializedName("platform_gst_amount") val platformGstAmount: Double = 0.0,
+    @SerializedName("platform_fee_kind") val platformFeeKind: String = "",
+    @SerializedName("provider_estimate") val providerEstimate: Double = 0.0,
+    @SerializedName("provider_estimate_message") val providerEstimateMessage: String = "",
+    @SerializedName("cancellation_policy") val cancellationPolicy: String = "",
     // false when the viewer is the provider looking at a read-only billing
     // summary — only the customer (isPayer=true) can actually pay.
     @SerializedName("is_payer") val isPayer: Boolean = true
@@ -179,7 +213,11 @@ data class CancelPreview(
     @SerializedName("fee_amount") val feeAmount: Double,
     @SerializedName("fee_pct") val feePct: Double,
     @SerializedName("is_free") val isFree: Boolean,
-    @SerializedName("policy_summary") val policySummary: String? = ""
+    @SerializedName("policy_summary") val policySummary: String? = "",
+    @SerializedName("direct_payment_required") val directPaymentRequired: Boolean = false,
+    @SerializedName("payer_role") val payerRole: String = "",
+    @SerializedName("payee_role") val payeeRole: String = "",
+    @SerializedName("payee_upi_id") val payeeUpiId: String = ""
 )
 
 data class UserProfile(
@@ -198,6 +236,29 @@ data class UserProfile(
     // tab decides between an empty-state CTA and rendering real requests.
     @SerializedName("has_provider_listings") val hasProviderListings: Boolean = false
     ,@SerializedName("role") val role: String = "USER"
+)
+
+/** Authoritative, single-read operational summary for the provider home. */
+data class ProviderDashboardSummary(
+    @SerializedName("verification_status") val verificationStatus: String = "NOT_REGISTERED",
+    @SerializedName("tier") val tier: String = "FREE",
+    @SerializedName("is_available") val isAvailable: Boolean = false,
+    @SerializedName("rating") val rating: Double = 0.0,
+    @SerializedName("review_count") val reviewCount: Int = 0,
+    @SerializedName("response_rate_pct") val responseRatePct: Double = 0.0,
+    @SerializedName("profile_score") val profileScore: Int = 0,
+    @SerializedName("total_listings") val totalListings: Int = 0,
+    @SerializedName("active_listings") val activeListings: Int = 0,
+    @SerializedName("inactive_listings") val inactiveListings: Int = 0,
+    @SerializedName("requested_jobs") val requestedJobs: Int = 0,
+    @SerializedName("unseen_requests") val unseenRequests: Int = 0,
+    @SerializedName("active_jobs") val activeJobs: Int = 0,
+    @SerializedName("today_jobs") val todayJobs: Int = 0,
+    @SerializedName("upcoming_jobs") val upcomingJobs: Int = 0,
+    @SerializedName("completed_jobs") val completedJobs: Int = 0,
+    @SerializedName("ended_jobs") val endedJobs: Int = 0,
+    @SerializedName("disputed_jobs") val disputedJobs: Int = 0,
+    @SerializedName("wallet_balance") val walletBalance: Double = 0.0
 )
 
 data class AdminPaymentReview(
@@ -257,6 +318,7 @@ data class AndroidChatResponse(
 )
 
 data class AndroidCategoryItem(
+    @SerializedName("id") val id: String = "",
     @SerializedName("slug") val slug: String,
     @SerializedName("name") val name: String,
     @SerializedName("emoji") val emoji: String = "",
@@ -266,23 +328,28 @@ data class AndroidCategoryItem(
         id = slug,
         name = name,
         emoji = emoji,
-        description = description
+        description = description,
+        backendId = id
     )
 }
 
 data class AndroidServiceTypeItem(
+    @SerializedName("id") val id: String = "",
     @SerializedName("slug") val slug: String,
     @SerializedName("name") val name: String,
     @SerializedName("emoji") val emoji: String = "",
     @SerializedName("description") val description: String = "",
-    @SerializedName("category_slug") val categorySlug: String = ""
+    @SerializedName("category_slug") val categorySlug: String = "",
+    @SerializedName("is_active") val isActive: Boolean = true
 ) {
     fun toServiceType(): ServiceType = ServiceType(
         slug = slug,
         name = name,
         emoji = emoji,
         description = description,
-        categorySlug = categorySlug
+        categorySlug = categorySlug,
+        isActive = isActive,
+        backendId = id
     )
 }
 
@@ -416,11 +483,59 @@ data class AndroidBridgeResponse(
     ,@SerializedName("availability_slots") val availabilitySlots: List<AvailabilitySlot> = emptyList()
     ,@SerializedName("provider_availability") val providerAvailability: ProviderAvailabilitySettings? = null
     ,@SerializedName("attachment_upload") val attachmentUpload: EngagementAttachmentUpload? = null
-    ,@SerializedName("listing_activation") val listingActivation: ListingActivation? = null
+    ,@SerializedName("listing_activation") val listingActivation: ListingActivation? = null,
+    @SerializedName("provider_dashboard") val providerDashboard: ProviderDashboardSummary? = null,
+    @SerializedName("service_catalog") val serviceCatalog: ListingServiceCatalog? = null,
+    @SerializedName("media_upload") val mediaUpload: MediaUploadSession? = null,
+    @SerializedName("media_assets") val mediaAssets: List<MediaAsset>? = null,
+    @SerializedName("wallet_balance") val walletBalance: Double? = null
+)
+
+data class MediaVariant(
+    @SerializedName("variant") val variant: String,
+    @SerializedName("telegram_file_id") val telegramFileId: String,
+    @SerializedName("telegram_file_unique_id") val telegramFileUniqueId: String = "",
+    @SerializedName("mime_type") val mimeType: String = "image/jpeg",
+    @SerializedName("width") val width: Int,
+    @SerializedName("height") val height: Int,
+    @SerializedName("byte_size") val byteSize: Int,
+    @SerializedName("checksum") val checksum: String = ""
+)
+
+data class MediaAsset(
+    @SerializedName("id") val id: String,
+    @SerializedName("owner_kind") val ownerKind: String,
+    @SerializedName("owner_provider_id") val ownerProviderId: String = "",
+    @SerializedName("scope") val scope: String,
+    @SerializedName("scope_id") val scopeId: String = "",
+    @SerializedName("role") val role: String = "PRIMARY",
+    @SerializedName("title") val title: String = "",
+    @SerializedName("subtitle") val subtitle: String = "",
+    @SerializedName("action_label") val actionLabel: String = "",
+    @SerializedName("action_value") val actionValue: String = "",
+    @SerializedName("status") val status: String = "ACTIVE",
+    @SerializedName("display_order") val displayOrder: Int = 0,
+    @SerializedName("variants") val variants: List<MediaVariant> = emptyList()
+) {
+    fun fileIdFor(preferred: String): String? =
+        variants.firstOrNull { it.variant.equals(preferred, ignoreCase = true) }?.telegramFileId
+            ?: variants.firstOrNull { it.variant.equals("CARD", ignoreCase = true) }?.telegramFileId
+            ?: variants.firstOrNull()?.telegramFileId
+}
+
+data class MediaUploadSession(
+    @SerializedName("token") val token: String,
+    @SerializedName("scope") val scope: String,
+    @SerializedName("scope_id") val scopeId: String = "",
+    @SerializedName("role") val role: String = "PRIMARY",
+    @SerializedName("expires_at") val expiresAt: String,
+    @SerializedName("owner_kind") val ownerKind: String,
+    @SerializedName("provider_id") val providerId: String = ""
 )
 
 data class ListingActivation(
     @SerializedName("is_active") val isActive: Boolean,
+    @SerializedName("total_booking_count") val totalBookingCount: Int = 0,
     @SerializedName("open_booking_count") val openBookingCount: Int,
     @SerializedName("requested_booking_count") val requestedBookingCount: Int
 )
@@ -443,6 +558,7 @@ data class EngagementDraft(
     @SerializedName("id") val id: String,
     @SerializedName("listing_id") val listingId: String,
     @SerializedName("status") val status: String,
+    @SerializedName("service_selection") val serviceSelection: com.google.gson.JsonObject? = null,
     @SerializedName("request_note") val requestNote: String = "",
     @SerializedName("is_home_service") val isHomeService: Boolean = true,
     @SerializedName("customer_address") val customerAddress: String = "",
@@ -454,6 +570,45 @@ data class EngagementDraft(
     @SerializedName("timezone") val timezone: String = "Asia/Kolkata",
     @SerializedName("engagement_id") val engagementId: String? = null,
     @SerializedName("expires_at") val expiresAt: String
+)
+
+/** Customer-safe catalogue for one listing. The backend fixes its provider and
+ * service type, so this model can never become a multi-provider cart. */
+data class ListingServiceCatalog(
+    @SerializedName("listing_id") val listingId: String,
+    @SerializedName("provider_id") val providerId: String,
+    @SerializedName("service_type_id") val serviceTypeId: String,
+    @SerializedName("offerings") val offerings: List<ProviderServiceOffering> = emptyList(),
+    @SerializedName("packages") val packages: List<ProviderServicePackage> = emptyList(),
+    @SerializedName("listing_media") val listingMedia: MediaAsset? = null
+)
+
+data class ProviderServiceOffering(
+    @SerializedName("id") val id: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("description") val description: String = "",
+    @SerializedName("attribute_values") val attributeValues: com.google.gson.JsonObject? = null,
+    @SerializedName("price_amount") val priceAmount: Double,
+    @SerializedName("duration_minutes") val durationMinutes: Int,
+    @SerializedName("is_active") val isActive: Boolean = true,
+    @SerializedName("display_order") val displayOrder: Int = 0,
+    @SerializedName("quantity") val quantity: Int = 1,
+    @SerializedName("media") val media: MediaAsset? = null
+)
+
+data class ProviderServicePackage(
+    @SerializedName("id") val id: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("description") val description: String = "",
+    @SerializedName("included_text") val includedText: String = "",
+    @SerializedName("excluded_text") val excludedText: String = "",
+    @SerializedName("package_price_amount") val packagePriceAmount: Double,
+    @SerializedName("duration_minutes") val durationMinutes: Int,
+    @SerializedName("status") val status: String = "PUBLISHED",
+    @SerializedName("display_order") val displayOrder: Int = 0,
+    @SerializedName("version") val version: Int = 1,
+    @SerializedName("items") val items: List<ProviderServiceOffering> = emptyList(),
+    @SerializedName("media") val media: MediaAsset? = null
 )
 
 data class BookingPolicy(
@@ -556,8 +711,11 @@ data class AndroidBridgeListing(
     @SerializedName("category") val category: String = "",
     @SerializedName("phone") val phone: String = "",
     @SerializedName("is_active") val isActive: Boolean = true,
+    @SerializedName("total_booking_count") val totalBookingCount: Int = 0,
     @SerializedName("open_booking_count") val openBookingCount: Int = 0,
     @SerializedName("requested_booking_count") val requestedBookingCount: Int = 0,
+    @SerializedName("work_item_count") val workItemCount: Int = 0,
+    @SerializedName("package_count") val packageCount: Int = 0,
     @SerializedName("service_radius_km") val serviceRadiusKm: Int = 5,
     @SerializedName("tagline") val tagline: String? = null,
     @SerializedName("currency") val currency: String? = null,
@@ -583,8 +741,11 @@ data class AndroidBridgeListing(
         badge = if (isVerified) "\u2705 VERIFIED" else "",
         phone = phone,
         isActive = isActive,
+        totalBookingCount = totalBookingCount,
         openBookingCount = openBookingCount,
         requestedBookingCount = requestedBookingCount,
+        workItemCount = workItemCount,
+        packageCount = packageCount,
         serviceRadiusKm = serviceRadiusKm,
         tagline = tagline.orEmpty(),
         pricingModel = pricingModel.orEmpty(),

@@ -217,7 +217,7 @@ fun ServiceListingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                        .padding(horizontal = 16.dp, vertical = NestoraFilterPanelSpacing),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -249,6 +249,7 @@ fun ServiceListingsScreen(
                     }
 
                     // Sort By Dropdown Pill
+                    if (false) {
                     Box {
                         Surface(
                             onClick = { isSortDropdownOpen = true },
@@ -296,6 +297,7 @@ fun ServiceListingsScreen(
                                 )
                             }
                         }
+                    }
                     }
 
                     // Quick Chip: Available Today
@@ -491,7 +493,7 @@ fun FilterBottomSheet(
     onApply: (ServiceFilterState) -> Unit
 ) {
     var draftFilter by remember { mutableStateOf(currentFilterState) }
-    var selectedCategoryIndex by remember { mutableStateOf(0) }
+    var selectedCategoryIndex by remember { mutableStateOf(1) }
 
     val categories = listOf(
         "Sort",
@@ -506,49 +508,10 @@ fun FilterBottomSheet(
         "Cost for two"
     )
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color.White,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    FilterOverlaySheet(
+        title = "Filter services",
+        onDismissRequest = onDismiss
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.85f)
-        ) {
-            // Sheet Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Filter",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0D1A13)
-                )
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFF2F2F2))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = Color(0xFF555555),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-
-            HorizontalDivider(color = Color(0xFFEEEEEE), thickness = 1.dp)
-
             // Two-Column Body
             Row(
                 modifier = Modifier
@@ -563,7 +526,8 @@ fun FilterBottomSheet(
                         .background(Color(0xFFF7F8FA))
                         .verticalScroll(rememberScrollState())
                 ) {
-                    categories.forEachIndexed { index, cat ->
+                    categories.drop(1).forEachIndexed { visibleIndex, cat ->
+                        val index = visibleIndex + 1
                         val isSelected = selectedCategoryIndex == index
                         Box(
                             modifier = Modifier
@@ -595,7 +559,11 @@ fun FilterBottomSheet(
                     }
                 }
 
-                VerticalDivider(color = Color(0xFFEEEEEE), thickness = 1.dp)
+                VerticalDivider(
+                    modifier = Modifier.fillMaxHeight(),
+                    color = FilterPaneDividerColor,
+                    thickness = 1.dp
+                )
 
                 // RIGHT OPTIONS PANEL (65% width, white background)
                 Column(
@@ -775,7 +743,7 @@ fun FilterBottomSheet(
                 }
             }
 
-            HorizontalDivider(color = Color(0xFFEEEEEE), thickness = 1.dp)
+            HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
 
             // Sheet Footer Actions
             Row(
@@ -810,6 +778,5 @@ fun FilterBottomSheet(
                     )
                 }
             }
-        }
     }
 }

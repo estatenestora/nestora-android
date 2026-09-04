@@ -150,8 +150,10 @@ fun LiveTrackingMap(
             } else {
                 0f
             }
-            val rotation = (bearing - 270f + 360f) % 360f
-            style.getLayer(LAYER_TRAVELER)?.setProperties(iconRotate(rotation))
+            // The live marker is a top-down direction arrow whose zero angle
+            // already faces north. Do not rotate the old side-profile bike
+            // image: a real-world photo becomes head-down/legs-up at 90°.
+            style.getLayer(LAYER_TRAVELER)?.setProperties(iconRotate(providerMarkerRotation(bearing)))
         }
 
         val r = route
@@ -210,7 +212,7 @@ fun LiveTrackingMap(
             onMapReady = { map ->
                 mapRef = map
                 map.style?.let { style ->
-                    style.addImage(IMG_TRAVELER, customMarkerBitmap(context, R.drawable.provider_bike_marker))
+                    style.addImage(IMG_TRAVELER, directionalProviderMarkerBitmap())
 
                     style.addSource(GeoJsonSource(SRC_ROUTE))
                     style.addLayer(
@@ -503,6 +505,34 @@ private fun customMarkerBitmap(context: android.content.Context, drawableId: Int
     drawable.draw(canvas)
     return bmp
 }
+
+/** A rotation-safe, top-down provider direction marker for the live map. */
+private fun directionalProviderMarkerBitmap(sizePx: Int = 96): Bitmap {
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val center = sizePx / 2f
+    val radius = sizePx * 0.42f
+    val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(0, 103, 81) }
+    val arrow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+
+    canvas.drawCircle(center, center, radius, outline)
+    canvas.drawCircle(center, center, radius - sizePx * 0.045f, fill)
+    val pointer = android.graphics.Path().apply {
+        moveTo(center, sizePx * 0.16f)
+        lineTo(sizePx * 0.72f, sizePx * 0.72f)
+        lineTo(center, sizePx * 0.60f)
+        lineTo(sizePx * 0.28f, sizePx * 0.72f)
+        close()
+    }
+    canvas.drawPath(pointer, arrow)
+    return bitmap
+}
+
+/** MapLibre rotates clockwise from a north-facing icon. Keep this normalised
+ * so a route bearing can never flip the marker through an invalid angle. */
+internal fun providerMarkerRotation(bearing: Float): Float =
+    ((bearing % 360f) + 360f) % 360f
 
 private fun calculateBearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float {
 	// Location.distanceBetween returns [distance, initialBearing, finalBearing].
