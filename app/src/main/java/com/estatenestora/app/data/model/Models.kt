@@ -269,7 +269,19 @@ data class AdminPaymentReview(
     @SerializedName("provider_name") val providerName: String,
     @SerializedName("advance_amount") val advanceAmount: Double,
     @SerializedName("payment_screenshot") val paymentScreenshot: String = "",
-    @SerializedName("submitted_at") val submittedAt: String = ""
+    @SerializedName("submitted_at") val submittedAt: String = "",
+    @SerializedName("payment_kind") val paymentKind: String = "ADVANCE",
+    @SerializedName("payment_status") val paymentStatus: String = "",
+    @SerializedName("upi_transaction_id") val upiTransactionId: String = ""
+)
+
+data class WalletTopUp(
+    @SerializedName("id") val id: String,
+    @SerializedName("amount") val amount: Double,
+    @SerializedName("merchant_upi_id") val merchantUpiId: String,
+    @SerializedName("request_reference") val requestReference: String,
+    @SerializedName("upi_transaction_id") val upiTransactionId: String = "",
+    @SerializedName("status") val status: String
 )
 
 // ── REST API Request & Response Models ───────────────────────────────────────
@@ -488,7 +500,8 @@ data class AndroidBridgeResponse(
     @SerializedName("service_catalog") val serviceCatalog: ListingServiceCatalog? = null,
     @SerializedName("media_upload") val mediaUpload: MediaUploadSession? = null,
     @SerializedName("media_assets") val mediaAssets: List<MediaAsset>? = null,
-    @SerializedName("wallet_balance") val walletBalance: Double? = null
+    @SerializedName("wallet_balance") val walletBalance: Double? = null,
+    @SerializedName("wallet_top_up") val walletTopUp: WalletTopUp? = null
 )
 
 data class MediaVariant(
@@ -580,7 +593,8 @@ data class ListingServiceCatalog(
     @SerializedName("service_type_id") val serviceTypeId: String,
     @SerializedName("offerings") val offerings: List<ProviderServiceOffering> = emptyList(),
     @SerializedName("packages") val packages: List<ProviderServicePackage> = emptyList(),
-    @SerializedName("listing_media") val listingMedia: MediaAsset? = null
+    @SerializedName("listing_media") val listingMedia: MediaAsset? = null,
+    @SerializedName("listing_gallery") val listingGallery: List<MediaAsset>? = null
 )
 
 data class ProviderServiceOffering(
@@ -593,7 +607,8 @@ data class ProviderServiceOffering(
     @SerializedName("is_active") val isActive: Boolean = true,
     @SerializedName("display_order") val displayOrder: Int = 0,
     @SerializedName("quantity") val quantity: Int = 1,
-    @SerializedName("media") val media: MediaAsset? = null
+    @SerializedName("media") val media: MediaAsset? = null,
+    @SerializedName("media_gallery") val mediaGallery: List<MediaAsset>? = null
 )
 
 data class ProviderServicePackage(
@@ -608,7 +623,8 @@ data class ProviderServicePackage(
     @SerializedName("display_order") val displayOrder: Int = 0,
     @SerializedName("version") val version: Int = 1,
     @SerializedName("items") val items: List<ProviderServiceOffering> = emptyList(),
-    @SerializedName("media") val media: MediaAsset? = null
+    @SerializedName("media") val media: MediaAsset? = null,
+    @SerializedName("media_gallery") val mediaGallery: List<MediaAsset>? = null
 )
 
 data class BookingPolicy(

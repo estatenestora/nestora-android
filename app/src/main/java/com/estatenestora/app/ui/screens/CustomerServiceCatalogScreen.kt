@@ -1,5 +1,6 @@
 package com.estatenestora.app.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -16,12 +17,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -68,6 +79,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -110,10 +124,14 @@ internal fun customerCartFromSelection(
     useListingPrice: Boolean,
     defaultDurationMinutes: Int = 60
 ): CustomerProviderCart? {
+    val singleUnitQuantities = offeringQuantities
+        .filterKeys { it.isNotBlank() }
+        .filterValues { it > 0 }
+        .mapValues { 1 }
     val summary = customerServiceCartSummary(
         catalog = catalog,
         packageId = packageId,
-        offeringQuantities = offeringQuantities,
+        offeringQuantities = singleUnitQuantities,
         useListingPrice = useListingPrice,
         listingPrice = listing.price,
         defaultDurationMinutes = defaultDurationMinutes
@@ -123,7 +141,7 @@ internal fun customerCartFromSelection(
         providerId = catalog.providerId,
         serviceTypeId = catalog.serviceTypeId,
         packageId = packageId,
-        offeringQuantities = offeringQuantities.toMap(),
+        offeringQuantities = singleUnitQuantities,
         useListingPrice = useListingPrice,
         itemCount = summary.itemCount.coerceAtLeast(if (useListingPrice) 1 else 0),
         providerAmount = summary.providerAmount,
@@ -258,7 +276,7 @@ internal fun CustomerServiceCatalogScreen(
                 quantities.clear()
                 currentCart.offeringQuantities
                     .filterKeys { id -> loaded.offerings.any { it.id == id } }
-                    .forEach { (id, quantity) -> quantities[id] = quantity.coerceIn(1, 10) }
+                    .forEach { (id, _) -> quantities[id] = 1 }
                 useListingPrice = currentCart.useListingPrice
             }
         } else {
@@ -297,34 +315,36 @@ internal fun CustomerServiceCatalogScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(if (cartOnly) "Your cart" else "Provider services", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                },
-                actions = {
-                    if (!cartOnly) {
-                        IconButton(onClick = {
-                            if (currentCart == null) {
-                                scope.launch { snackbarHostState.showSnackbar("Your cart is empty. Add a package or service first.") }
-                            } else {
-                                onOpenCart()
-                            }
-                        }) {
-                            BadgedBox(
-                                badge = {
-                                    currentCart?.let { cart ->
-                                        Badge { Text(cart.itemCount.coerceAtLeast(1).toString()) }
-                                    }
+            if (loading || error != null || cartOnly || switchConflict) {
+                TopAppBar(
+                    title = { Text(if (cartOnly) "Your cart" else "Provider services", fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    },
+                    actions = {
+                        if (!cartOnly) {
+                            IconButton(onClick = {
+                                if (currentCart == null) {
+                                    scope.launch { snackbarHostState.showSnackbar("Your cart is empty. Add a package or service first.") }
+                                } else {
+                                    onOpenCart()
                                 }
-                            ) {
-                                Icon(Icons.Default.ShoppingCart, contentDescription = "Open cart", tint = NestoraMint)
+                            }) {
+                                BadgedBox(
+                                    badge = {
+                                        currentCart?.let { cart ->
+                                            Badge { Text(cart.itemCount.coerceAtLeast(1).toString()) }
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.ShoppingCart, contentDescription = "Open cart", tint = NestoraMint)
+                                }
                             }
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
@@ -357,13 +377,13 @@ internal fun CustomerServiceCatalogScreen(
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
                 loading -> Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
-                    StorefrontProviderSummary(listing)
+                    StorefrontUrbanCompanyHero(listing)
                     Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = NestoraMint)
                     }
                 }
                 error != null -> Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
-                    StorefrontProviderSummary(listing)
+                    StorefrontUrbanCompanyHero(listing)
                     HorizontalDivider(thickness = 8.dp, color = Color(0xFFEFF2F1))
                     Column(
                         modifier = Modifier.fillMaxWidth().background(Color.White).padding(16.dp),
@@ -390,7 +410,7 @@ internal fun CustomerServiceCatalogScreen(
                     val loaded = catalog ?: return@Box
                     if (cartOnly) {
                         Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
-                            StorefrontProviderSummary(listing)
+                            StorefrontUrbanCompanyHero(listing)
                             HorizontalDivider(thickness = 8.dp, color = Color(0xFFEFF2F1))
                             CustomerCartReview(
                             listing = listing,
@@ -403,7 +423,7 @@ internal fun CustomerServiceCatalogScreen(
                                 updateCart(nextPackageId = null)
                             },
                             onChangeQuantity = { id, quantity ->
-                                if (quantity <= 0) quantities.remove(id) else quantities[id] = quantity.coerceAtMost(10)
+                                if (quantity <= 0) quantities.remove(id) else quantities[id] = 1
                                 updateCart(nextQuantities = quantities.toMap())
                             },
                             onClear = {
@@ -422,6 +442,15 @@ internal fun CustomerServiceCatalogScreen(
                             selectedPackageId = selectedPackageId,
                             quantities = quantities,
                             useListingPrice = useListingPrice,
+                            currentCart = currentCart,
+                            onBack = onBack,
+                            onOpenCart = {
+                                if (currentCart == null) {
+                                    scope.launch { snackbarHostState.showSnackbar("Your cart is empty. Add a package or service first.") }
+                                } else {
+                                    onOpenCart()
+                                }
+                            },
                             onResolveMedia = onResolveMedia,
                             onSelectPackage = { id ->
                                 val next = if (selectedPackageId == id) null else id
@@ -430,7 +459,7 @@ internal fun CustomerServiceCatalogScreen(
                                 updateCart(nextPackageId = next, nextUseListingPrice = false)
                             },
                             onChangeQuantity = { id, quantity ->
-                                if (quantity <= 0) quantities.remove(id) else quantities[id] = quantity.coerceAtMost(10)
+                                if (quantity <= 0) quantities.remove(id) else quantities[id] = 1
                                 useListingPrice = false
                                 updateCart(nextQuantities = quantities.toMap(), nextUseListingPrice = false)
                             },
@@ -439,6 +468,14 @@ internal fun CustomerServiceCatalogScreen(
                                 quantities.clear()
                                 useListingPrice = true
                                 updateCart(nextPackageId = null, nextQuantities = emptyMap(), nextUseListingPrice = true)
+                            },
+                            onAddPackageItems = { packageId, additions ->
+                                val next = customerPackageItemSelection(loaded, quantities, additions)
+                                quantities.clear()
+                                quantities.putAll(next)
+                                if (selectedPackageId == packageId) selectedPackageId = null
+                                useListingPrice = false
+                                updateCart(nextQuantities = next, nextUseListingPrice = false)
                             }
                         )
                     }
@@ -447,8 +484,7 @@ internal fun CustomerServiceCatalogScreen(
         }
     }
 }
-
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun CustomerProviderStorefront(
     listing: ServiceListing,
@@ -456,18 +492,25 @@ private fun CustomerProviderStorefront(
     selectedPackageId: String?,
     quantities: Map<String, Int>,
     useListingPrice: Boolean,
+    currentCart: CustomerProviderCart?,
+    onBack: () -> Unit,
+    onOpenCart: () -> Unit,
     onResolveMedia: suspend (String) -> String?,
     onSelectPackage: (String) -> Unit,
     onChangeQuantity: (String, Int) -> Unit,
-    onSelectCustom: () -> Unit
+    onSelectCustom: () -> Unit,
+    onAddPackageItems: (String, Map<String, Int>) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
     var query by remember(catalog.listingId) { mutableStateOf("") }
     var mode by remember(catalog.listingId) { mutableStateOf("ALL") }
     var affordableOnly by remember(catalog.listingId) { mutableStateOf(false) }
     var showItemsNavigator by remember(catalog.listingId) { mutableStateOf(false) }
+    var detailOffering by remember(catalog.listingId) { mutableStateOf<ProviderServiceOffering?>(null) }
+    var detailPackage by remember(catalog.listingId) { mutableStateOf<ProviderServicePackage?>(null) }
     val result = remember(catalog, listing, query, mode, affordableOnly) {
         customerCatalogSearch(
             catalog = catalog,
@@ -492,7 +535,7 @@ private fun CustomerProviderStorefront(
     }
     val sectionDestinations = remember(blocks) {
         blocks.mapIndexedNotNull { index, block ->
-            (block as? StorefrontBlock.Section)?.let { it to (index + 2) }
+            (block as? StorefrontBlock.Section)?.let { it to (index + 3) }
         }
     }
     val currentSection by remember(listState, sectionDestinations) {
@@ -504,8 +547,27 @@ private fun CustomerProviderStorefront(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
+        val isScrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 180 } }
+
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-            item(key = "provider-summary") { StorefrontProviderSummary(listing, catalog.listingMedia, onResolveMedia) }
+            item(key = "provider-hero-info") {
+                StorefrontUrbanCompanyHero(
+                    listing = listing,
+                    managedMedia = catalog.listingGallery.orEmpty().ifEmpty { listOfNotNull(catalog.listingMedia) },
+                    onResolveMedia = onResolveMedia
+                )
+            }
+            item(key = "provider-categories") {
+                StorefrontCategoryGrid(
+                    packages = result.packages,
+                    offeringGroups = result.offeringGroups,
+                    fallbackPhotoUrl = listing.photoUrl,
+                    onResolveMedia = onResolveMedia
+                ) { sectionKey ->
+                    val index = sectionDestinations.firstOrNull { it.first.key == sectionKey }?.second
+                    if (index != null) scope.launch { listState.animateScrollToItem(index) }
+                }
+            }
             stickyHeader(key = "catalog-search") {
                 StorefrontSearchPanel(
                     query = query,
@@ -542,7 +604,8 @@ private fun CustomerProviderStorefront(
                             photoUrl = block.value.items.firstNotNullOfOrNull(::offeringPhotoUrl) ?: listing.photoUrl,
                             media = block.value.media,
                             onResolveMedia = onResolveMedia,
-                            onToggle = { onSelectPackage(block.value.id) }
+                            onToggle = { onSelectPackage(block.value.id) },
+                            onDetails = { detailPackage = block.value }
                         )
                         StorefrontItemDivider()
                     }
@@ -553,7 +616,8 @@ private fun CustomerProviderStorefront(
                             media = block.value.media,
                             onResolveMedia = onResolveMedia,
                             quantity = quantities[block.value.id] ?: 0,
-                            onQuantityChange = { onChangeQuantity(block.value.id, it) }
+                            onToggle = { onChangeQuantity(block.value.id, if ((quantities[block.value.id] ?: 0) > 0) 0 else 1) },
+                            onDetails = { detailOffering = block.value }
                         )
                         StorefrontItemDivider()
                     }
@@ -579,8 +643,46 @@ private fun CustomerProviderStorefront(
                 }
             }
         }
+
+        StorefrontUrbanCompanyTopBar(
+            title = listing.title,
+            subtitle = listing.location,
+            isScrolled = isScrolled,
+            cartItemCount = currentCart?.itemCount ?: 0,
+            onBack = onBack,
+            onSearch = {
+                focusManager.clearFocus()
+                scope.launch { listState.animateScrollToItem(2) }
+            },
+            onShare = {
+                val share = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, "${listing.title} by ${listing.providerName} on Nestora")
+                }
+                context.startActivity(Intent.createChooser(share, "Share provider"))
+            },
+            onCart = onOpenCart
+        )
     }
 
+    detailOffering?.let { offer ->
+        CustomerCatalogExperienceDrawer(
+            listing = listing, catalog = catalog, offering = offer,
+            quantity = quantities[offer.id] ?: 0, onResolveMedia = onResolveMedia,
+            onDismiss = { detailOffering = null },
+            onOfferingQuantity = { onChangeQuantity(offer.id, it) }
+        )
+    }
+    detailPackage?.let { pack ->
+        CustomerCatalogExperienceDrawer(
+            listing = listing, catalog = catalog, pack = pack,
+            existingQuantities = quantities,
+            packageSelected = selectedPackageId == pack.id, onResolveMedia = onResolveMedia,
+            onDismiss = { detailPackage = null },
+            onCompletePackage = { onSelectPackage(pack.id) },
+            onPackageItems = { onAddPackageItems(pack.id, it) }
+        )
+    }
     if (showItemsNavigator) {
         StorefrontItemsNavigator(
             sections = sectionDestinations.map { it.first },
@@ -595,63 +697,275 @@ private fun CustomerProviderStorefront(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun StorefrontProviderSummary(
+private fun StorefrontUrbanCompanyHero(
     listing: ServiceListing,
-    managedMedia: MediaAsset? = null,
+    managedMedia: List<MediaAsset> = emptyList(),
     onResolveMedia: suspend (String) -> String? = { null }
 ) {
-    val fileId = remember(managedMedia?.id) { managedMedia?.fileIdFor("HERO") }
-    var managedPath by remember(fileId) { mutableStateOf<String?>(null) }
-    LaunchedEffect(fileId) { managedPath = fileId?.let { onResolveMedia(it) } }
-    val heroImage = managedPath ?: listing.photoUrl?.takeIf(String::isNotBlank)
-    Column(
-        modifier = Modifier.fillMaxWidth().background(Color(0xFF07100D)).padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        heroImage?.let { photo ->
+    val carousel = remember(managedMedia, listing.photoUrl) { managedMedia.distinctBy { it.id } }
+    val pageCount = carousel.size.coerceAtLeast(1)
+    val pagerState = rememberPagerState(pageCount = { pageCount })
+
+    Column(modifier = Modifier.fillMaxWidth().background(Color.White)) {
+        Box(modifier = Modifier.fillMaxWidth().height(270.dp)) {
+            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                val asset = carousel.getOrNull(page)
+                StorefrontCarouselImage(
+                    media = asset,
+                    fallbackPhotoUrl = listing.photoUrl,
+                    title = listing.title,
+                    onResolveMedia = onResolveMedia
+                )
+            }
+            Box(
+                modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(110.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.62f))))
+            )
+            carousel.getOrNull(pagerState.currentPage)?.let { asset ->
+                if (asset.title.isNotBlank() || asset.subtitle.isNotBlank()) {
+                    Column(
+                        Modifier.align(Alignment.BottomStart).padding(start = 18.dp, end = 80.dp, bottom = 18.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        if (asset.title.isNotBlank()) Text(asset.title, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                        if (asset.subtitle.isNotBlank()) Text(asset.subtitle, color = Color.White.copy(alpha = 0.92f), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            if (carousel.size > 1) {
+                Surface(
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    color = Color.Black.copy(alpha = 0.68f),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text(
+                        "${pagerState.currentPage + 1}/${carousel.size}",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(listing.title, color = Color(0xFF111A16), fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
+            Text("by ${listing.providerName}", color = Color(0xFF53615A), fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFF176B50), modifier = Modifier.size(16.dp))
+                Text(
+                    if (listing.rating > 0f) String.format(Locale.US, "%.1f provider rating", listing.rating) else "New provider",
+                    color = Color(0xFF19221E),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+            if (listing.location.isNotBlank()) {
+                Text(listing.location, color = Color(0xFF66736D), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        HorizontalDivider(thickness = 8.dp, color = Color(0xFFF3F5F4))
+    }
+}
+
+@Composable
+private fun StorefrontCarouselImage(
+    media: MediaAsset?,
+    fallbackPhotoUrl: String?,
+    title: String,
+    onResolveMedia: suspend (String) -> String?
+) {
+    val fileId = remember(media?.id) { media?.fileIdFor("HERO") }
+    var resolvedPath by remember(fileId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(fileId) { resolvedPath = fileId?.let { onResolveMedia(it) } }
+    val image = resolvedPath ?: fallbackPhotoUrl?.takeIf(String::isNotBlank)
+    if (image != null) {
+        AsyncImage(model = image, contentDescription = title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    } else {
+        Box(Modifier.fillMaxSize().background(Color(0xFFE6ECE9)), contentAlignment = Alignment.Center) {
+            Text(title.take(2).uppercase(Locale.getDefault()), color = Color(0xFF2D6551), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+        }
+    }
+}
+@Composable
+private fun StorefrontCategoryGrid(
+    packages: List<ProviderServicePackage>,
+    offeringGroups: Map<String, List<ProviderServiceOffering>>,
+    fallbackPhotoUrl: String?,
+    onResolveMedia: suspend (String) -> String?,
+    onCategoryClick: (String) -> Unit
+) {
+    val shortcuts = remember(packages, offeringGroups) {
+        buildList {
+            if (packages.isNotEmpty()) {
+                val packageMedia = packages.firstNotNullOfOrNull { pack ->
+                    pack.mediaGallery.orEmpty().firstOrNull() ?: pack.media ?: pack.items.firstNotNullOfOrNull { it.mediaGallery.orEmpty().firstOrNull() ?: it.media }
+                }
+                add(StorefrontShortcut("section-packages", "Packages", packageMedia))
+            }
+            offeringGroups.forEach { (group, offers) ->
+                add(StorefrontShortcut("section-$group", group, offers.firstNotNullOfOrNull { it.mediaGallery.orEmpty().firstOrNull() ?: it.media }))
+            }
+        }
+    }
+    if (shortcuts.isEmpty()) return
+    Column(modifier = Modifier.fillMaxWidth().background(Color.White).padding(top = 16.dp)) {
+        Text(
+            "Explore services",
+            modifier = Modifier.padding(horizontal = 18.dp),
+            color = Color(0xFF111A16),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Spacer(Modifier.height(14.dp))
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(shortcuts, key = { it.sectionKey }) { shortcut ->
+                Column(
+                    modifier = Modifier.width(82.dp).clickable { onCategoryClick(shortcut.sectionKey) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    StorefrontShortcutImage(
+                        shortcut = shortcut,
+                        fallbackPhotoUrl = fallbackPhotoUrl,
+                        onResolveMedia = onResolveMedia
+                    )
+                    Text(
+                        shortcut.label,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        lineHeight = 14.sp,
+                        overflow = TextOverflow.Ellipsis,
+                        color = Color(0xFF26332D)
+                    )
+                }
+            }
+        }
+        HorizontalDivider(modifier = Modifier.padding(top = 18.dp), thickness = 8.dp, color = Color(0xFFF3F5F4))
+    }
+}
+
+private data class StorefrontShortcut(val sectionKey: String, val label: String, val media: MediaAsset?)
+
+@Composable
+private fun StorefrontShortcutImage(
+    shortcut: StorefrontShortcut,
+    fallbackPhotoUrl: String?,
+    onResolveMedia: suspend (String) -> String?
+) {
+    val fileId = remember(shortcut.media?.id) { shortcut.media?.fileIdFor("CARD") }
+    var resolvedPath by remember(fileId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(fileId) { resolvedPath = fileId?.let { onResolveMedia(it) } }
+    val image = resolvedPath ?: fallbackPhotoUrl?.takeIf(String::isNotBlank)
+    Surface(modifier = Modifier.size(82.dp), shape = RoundedCornerShape(14.dp), color = Color(0xFFF0F3F1)) {
+        if (image != null) {
             AsyncImage(
-                model = photo,
-                contentDescription = listing.title,
-                modifier = Modifier.fillMaxWidth().height(128.dp).clip(RoundedCornerShape(18.dp)),
+                model = image,
+                contentDescription = shortcut.label,
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
-        }
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            color = Color.White,
-            shadowElevation = 5.dp
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(listing.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = Color(0xFF111A16))
-                        Text("by ${listing.providerName}", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF52675E))
-                    }
-                    if (listing.rating > 0f) {
-                        Surface(color = Color(0xFF146B4A), shape = RoundedCornerShape(12.dp)) {
-                            Text(
-                                "${String.format(Locale.US, "%.1f", listing.rating)} rating",
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                                color = Color.White,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                }
-                Text(listing.location, style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                HorizontalDivider(color = Color(0xFFE7EBE9))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(if (listing.isVerified) "Verified provider" else "Service provider", color = Color(0xFF146B4A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    Text("Services from ₹${listing.price.toInt()}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
+        } else {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    shortcut.label.take(2).uppercase(Locale.getDefault()),
+                    color = NestoraMint,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 20.sp
+                )
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StorefrontUrbanCompanyTopBar(
+    title: String,
+    subtitle: String,
+    isScrolled: Boolean,
+    cartItemCount: Int,
+    onBack: () -> Unit,
+    onSearch: () -> Unit,
+    onShare: () -> Unit,
+    onCart: () -> Unit
+) {
+    val backgroundColor by animateColorAsState(if (isScrolled) Color.White else Color.Transparent, label = "bg")
+    val dividerColor by animateColorAsState(if (isScrolled) Color(0xFFE3E8E5) else Color.Transparent, label = "divider")
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = backgroundColor,
+        shadowElevation = 0.dp
+    ) {
+        Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StorefrontHeaderAction(onClick = onBack, contentDescription = "Back") {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(20.dp))
+                }
+                if (isScrolled) {
+                    Column(
+                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = Color(0xFF101814), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        subtitle.takeIf(String::isNotBlank)?.let {
+                            Text(it, color = Color(0xFF66736D), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+                StorefrontHeaderAction(onClick = onSearch, contentDescription = "Search") {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(20.dp))
+                }
+                Spacer(Modifier.width(7.dp))
+                StorefrontHeaderAction(onClick = onShare, contentDescription = "Share") {
+                    Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(19.dp))
+                }
+                if (cartItemCount > 0) {
+                    Spacer(Modifier.width(7.dp))
+                    StorefrontHeaderAction(onClick = onCart, contentDescription = "Cart") {
+                        BadgedBox(badge = { Badge { Text(cartItemCount.toString()) } }) {
+                            Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(19.dp))
+                        }
+                    }
+                }
+            }
+            HorizontalDivider(color = dividerColor)
+        }
+    }
+}
+
+@Composable
+private fun StorefrontHeaderAction(
+    onClick: () -> Unit,
+    contentDescription: String,
+    content: @Composable () -> Unit
+) {
+    Surface(
+        modifier = Modifier.size(38.dp).semantics { this.contentDescription = contentDescription },
+        shape = CircleShape,
+        color = Color.White,
+        shadowElevation = 2.dp
+    ) {
+        IconButton(onClick = onClick, modifier = Modifier.fillMaxSize()) {
+            Box(contentAlignment = Alignment.Center) {
+                content()
+            }
+        }
+    }
+}
 @Composable
 private fun StorefrontSearchPanel(
     query: String,
@@ -794,11 +1108,12 @@ private fun StorefrontPackageCard(
     photoUrl: String?,
     media: MediaAsset?,
     onResolveMedia: suspend (String) -> String?,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    onDetails: () -> Unit
 ) {
     val savings = providerPackageSavings(pack)
     Row(
-        modifier = Modifier.fillMaxWidth().background(if (selected) Color(0xFFF0FAF6) else Color.White).padding(horizontal = 16.dp, vertical = 15.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails).background(if (selected) Color(0xFFF0FAF6) else Color.White).padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -812,7 +1127,7 @@ private fun StorefrontPackageCard(
                 Text(pack.description, style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Text(
-                "${pack.durationMinutes} min · ${pack.items.sumOf { it.quantity.coerceAtLeast(1) }} services",
+                "${pack.durationMinutes} min · ${pack.items.size} services",
                 style = MaterialTheme.typography.labelMedium,
                 color = Color(0xFF486158)
             )
@@ -827,10 +1142,7 @@ private fun StorefrontPackageCard(
             onResolveMedia = onResolveMedia,
             title = pack.name,
             selected = selected,
-            quantity = if (selected) 1 else 0,
-            onAdd = onToggle,
-            onQuantityChange = { onToggle() },
-            quantityEnabled = false
+            onAdd = onToggle
         )
     }
 }
@@ -842,10 +1154,11 @@ private fun StorefrontOfferingRow(
     media: MediaAsset? = null,
     onResolveMedia: suspend (String) -> String? = { null },
     quantity: Int,
-    onQuantityChange: (Int) -> Unit
+    onToggle: () -> Unit,
+    onDetails: (() -> Unit)? = null
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().then(if (onDetails != null) Modifier.clickable(onClick = onDetails) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -862,10 +1175,7 @@ private fun StorefrontOfferingRow(
             onResolveMedia = onResolveMedia,
             title = offer.title,
             selected = quantity > 0,
-            quantity = quantity,
-            onAdd = { onQuantityChange(1) },
-            onQuantityChange = onQuantityChange,
-            quantityEnabled = true
+            onAdd = onToggle
         )
     }
 }
@@ -877,10 +1187,7 @@ private fun StorefrontAddVisual(
     onResolveMedia: suspend (String) -> String?,
     title: String,
     selected: Boolean,
-    quantity: Int,
-    onAdd: () -> Unit,
-    onQuantityChange: (Int) -> Unit,
-    quantityEnabled: Boolean
+    onAdd: () -> Unit
 ) {
     val mediaFileId = remember(media?.id) { media?.fileIdFor("CARD") }
     var resolvedMedia by remember(mediaFileId) { mutableStateOf<String?>(null) }
@@ -904,20 +1211,14 @@ private fun StorefrontAddVisual(
                 Text(title.take(2).uppercase(Locale.getDefault()), color = Color(0xFF28624D), fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)
             }
         }
-        Box(modifier = Modifier.align(Alignment.BottomCenter)) {
-            if (quantityEnabled && quantity > 0) {
-                QuantityControl(quantity = quantity, onQuantityChange = onQuantityChange)
-            } else {
-                OutlinedButton(
-                    onClick = onAdd,
-                    modifier = Modifier.width(112.dp).height(44.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, NestoraMint),
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White)
-                ) { Text(if (selected) "REMOVE" else "ADD", color = NestoraMint, fontWeight = FontWeight.ExtraBold) }
-            }
-        }
+        OutlinedButton(
+            onClick = onAdd,
+            modifier = Modifier.align(Alignment.BottomCenter).width(112.dp).height(44.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, NestoraMint),
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White)
+        ) { Text(if (selected) "REMOVE" else "ADD", color = NestoraMint, fontWeight = FontWeight.ExtraBold) }
     }
 }
 
@@ -973,7 +1274,11 @@ private fun CustomerCartReview(
         }
         quantities.forEach { (id, quantity) ->
             catalog.offerings.firstOrNull { it.id == id }?.let { offer ->
-                StorefrontOfferingRow(offer = offer, quantity = quantity, onQuantityChange = { onChangeQuantity(id, it) })
+                StorefrontOfferingRow(
+                    offer = offer,
+                    quantity = quantity,
+                    onToggle = { onChangeQuantity(id, 0) }
+                )
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = Color(0xFFE5E9E7))
             }
         }

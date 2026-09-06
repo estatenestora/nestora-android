@@ -84,7 +84,7 @@ fun ProfileScreen(
     profile: UserProfile,
     onLogout: () -> Unit,
     onBack: () -> Unit,
-    onUpdateProfile: (UserProfile) -> Unit,
+    onUpdateProfile: suspend (UserProfile) -> UserProfile?,
     onUploadPhoto: suspend (android.net.Uri) -> String?,
     onResolvePhoto: suspend (String) -> String?,
     onSearchAddress: suspend (String, Double?, Double?) -> List<GeocodePlace>,
@@ -126,6 +126,7 @@ fun ProfileScreen(
     var showBackConfirmationDialog by remember { mutableStateOf(false) }
     var showLocationPicker by remember { mutableStateOf(false) }
     var isUploadingPhoto by remember { mutableStateOf(false) }
+    var isSavingProfile by remember { mutableStateOf(false) }
     var showLanguageSheet by remember { mutableStateOf(false) }
     val strings = com.estatenestora.app.ui.theme.LocalNestoraStrings.current
 
@@ -180,8 +181,9 @@ fun ProfileScreen(
         val nameRegex = Regex("^[a-zA-Z\\s]{2,50}$")
         val phoneRegex = Regex("^(\\+91)?[6-9]\\d{9}$")
         val emailRegex = Regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
-        // Standard UPI VPA format: alphanumeric/.-_ before @, bank handle after
+        // Accept a standard UPI VPA or the numeric UPI number format supported by the backend.
         val upiRegex = Regex("^[a-zA-Z0-9.\\-_]{2,256}@[a-zA-Z]{2,64}$")
+        val upiNumberRegex = Regex("^\\d{7,15}$")
 
         when {
             !nameRegex.matches(trimmedName) -> {
@@ -193,27 +195,31 @@ fun ProfileScreen(
             trimmedEmail.isNotEmpty() && !emailRegex.matches(trimmedEmail) -> {
                 showSnack("\u274C Invalid Email: Please enter a valid email address")
             }
-            trimmedUpi.isNotEmpty() && !upiRegex.matches(trimmedUpi) -> {
-                showSnack("\u274C Invalid UPI Number: Format should be yourname@bankhandle (e.g. 9876543210@okaxis)")
+            trimmedUpi.isNotEmpty() && !upiRegex.matches(trimmedUpi) && !upiNumberRegex.matches(trimmedUpi) -> {
+                showSnack("Invalid UPI ID. Use name@bankhandle or a 7-15 digit UPI number.")
             }
             trimmedPic.isNotEmpty() && !isValidImageUrl(trimmedPic) -> {
                 showSnack("\u274C Invalid profile image — please pick a photo from your gallery")
             }
             else -> {
-                try {
-                    val updated = profile.copy(
-                        name = trimmedName,
-                        phone = trimmedPhone,
-                        email = trimmedEmail,
-                        address = editAddress.trim(),
-                        profilePicUrl = trimmedPic,
-                        upiId = trimmedUpi
-                    )
-                    onUpdateProfile(updated)
-                    onSuccess()
-                    showSnack("\u2705 Profile updated successfully!", isError = false)
-                } catch (e: Exception) {
-                    showSnack("\u274C Failed to save profile: ${e.localizedMessage ?: "Unknown error"}")
+                val updated = profile.copy(
+                    name = trimmedName,
+                    phone = trimmedPhone,
+                    email = trimmedEmail,
+                    address = editAddress.trim(),
+                    profilePicUrl = trimmedPic,
+                    upiId = trimmedUpi
+                )
+                isSavingProfile = true
+                coroutineScope.launch {
+                    val saved = runCatching { onUpdateProfile(updated) }.getOrNull()
+                    isSavingProfile = false
+                    if (saved != null) {
+                        onSuccess()
+                        showSnack("Profile updated successfully.", isError = false)
+                    } else {
+                        showSnack("Could not save profile. Check your connection and try again.")
+                    }
                 }
             }
         }
@@ -264,6 +270,7 @@ fun ProfileScreen(
                     text = { Text("You have unsaved changes. Do you want to save them before leaving?") },
                     confirmButton = {
                         Button(
+                            enabled = !isSavingProfile,
                             onClick = {
                                 runValidationAndSave {
                                     showBackConfirmationDialog = false
@@ -272,7 +279,7 @@ fun ProfileScreen(
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
                         ) {
-                            Text("Save", color = Color.White)
+                            Text(if (isSavingProfile) "Saving..." else "Save", color = Color.White)
                         }
                     },
                     dismissButton = {
@@ -344,7 +351,7 @@ fun ProfileScreen(
                         
                         // Small "Save" word button
                         TextButton(
-                            enabled = isFormChanged,
+                            enabled = isFormChanged && !isSavingProfile,
                             onClick = {
                                 runValidationAndSave {
                                     isEditing = false
@@ -356,7 +363,7 @@ fun ProfileScreen(
                             )
                         ) {
                             Text(
-                                text = "Save",
+                                text = if (isSavingProfile) "Saving..." else "Save",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Black
                             )

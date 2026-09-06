@@ -38,13 +38,10 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 
 internal fun providerPackageItemsLabel(pack: ProviderServicePackage): String =
-    pack.items.joinToString(", ") { offer ->
-        val quantityPrefix = if (offer.quantity > 1) "${offer.quantity} x " else ""
-        "$quantityPrefix${offer.title}"
-    }
+    pack.items.joinToString(", ") { it.title }
 
 internal fun providerPackageItemsTotal(pack: ProviderServicePackage): Double =
-    pack.items.sumOf { it.priceAmount * it.quantity.coerceAtLeast(1) }
+    pack.items.sumOf { it.priceAmount }
 
 internal fun providerPackageSavings(pack: ProviderServicePackage): Double =
     (providerPackageItemsTotal(pack) - pack.packagePriceAmount).coerceAtLeast(0.0)
@@ -68,7 +65,7 @@ internal fun customerServiceSelectionPayload(
     val cleanPackageId = packageId?.trim().orEmpty()
     val cleanItems = offeringQuantities
         .filterKeys { it.isNotBlank() }
-        .filterValues { it in 1..10 }
+        .filterValues { it == 1 }
     val hasCatalogSelection = cleanPackageId.isNotBlank() || cleanItems.isNotEmpty()
     if (useListingPrice == hasCatalogSelection || cleanItems.size != offeringQuantities.size || cleanItems.size > 12) return null
     return JsonObject().apply {
@@ -105,23 +102,23 @@ internal fun customerServiceCartSummary(
         durationMinutes = defaultDurationMinutes.coerceAtLeast(5)
     )
     val pack = packageId?.takeIf { it.isNotBlank() }?.let { id -> catalog.packages.firstOrNull { it.id == id } ?: return null }
-    val selected = offeringQuantities.mapNotNull { (id, quantity) ->
-        catalog.offerings.firstOrNull { it.id == id }?.let { it to quantity }
+    val selected = offeringQuantities.mapNotNull { (id, _) ->
+        catalog.offerings.firstOrNull { it.id == id }?.let { it to 1 }
     }
     if (selected.size != offeringQuantities.size) return null
     if (pack != null) return CustomerServiceCartSummary(
         kind = if (selected.isEmpty()) "PACKAGE" else "MIXED",
         title = if (selected.isEmpty()) pack.name else "${pack.name} + ${selected.size} extra service(s)",
-        itemCount = pack.items.sumOf { it.quantity.coerceAtLeast(1) } + selected.sumOf { it.second },
-        providerAmount = pack.packagePriceAmount + selected.sumOf { (offer, quantity) -> offer.priceAmount * quantity },
-        durationMinutes = pack.durationMinutes + selected.sumOf { (offer, quantity) -> offer.durationMinutes * quantity }
+        itemCount = pack.items.size + selected.size,
+        providerAmount = pack.packagePriceAmount + selected.sumOf { it.first.priceAmount },
+        durationMinutes = pack.durationMinutes + selected.sumOf { it.first.durationMinutes }
     )
     return CustomerServiceCartSummary(
         kind = "ITEMS",
         title = if (selected.size == 1) selected.first().first.title else "${selected.first().first.title} + ${selected.size - 1} more",
-        itemCount = selected.sumOf { it.second },
-        providerAmount = selected.sumOf { (offer, quantity) -> offer.priceAmount * quantity },
-        durationMinutes = selected.sumOf { (offer, quantity) -> offer.durationMinutes * quantity }
+        itemCount = selected.size,
+        providerAmount = selected.sumOf { it.first.priceAmount },
+        durationMinutes = selected.sumOf { it.first.durationMinutes }
     )
 }
 
@@ -197,7 +194,7 @@ internal fun CustomerServiceScopePicker(
                             Text("₹${"%.0f".format(pack.packagePriceAmount)}", fontWeight = FontWeight.ExtraBold, color = NestoraMint)
                         }
                         if (pack.description.isNotBlank()) Text(pack.description, style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
-                        Text("${pack.durationMinutes} min · ${pack.items.sumOf { it.quantity.coerceAtLeast(1) }} work item(s)", style = MaterialTheme.typography.labelSmall, color = Color(0xFF486158))
+                        Text("${pack.durationMinutes} min · ${pack.items.size} work item(s)", style = MaterialTheme.typography.labelSmall, color = Color(0xFF486158))
                         Text("Includes: ${providerPackageItemsLabel(pack)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF486158), maxLines = 3, overflow = TextOverflow.Ellipsis)
                         if (pack.includedText.isNotBlank()) Text("Package includes: ${pack.includedText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF486158), maxLines = 2, overflow = TextOverflow.Ellipsis)
                         if (savings > 0) Text("You save ₹${"%.0f".format(savings)}", style = MaterialTheme.typography.labelMedium, color = Color(0xFF14513D), fontWeight = FontWeight.Bold)
@@ -241,15 +238,11 @@ internal fun CustomerServiceScopePicker(
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                         ) { Text("Add") }
                     } else {
-                        IconButton(
-                            onClick = { onChangeOfferingQuantity(offer.id, quantity - 1) },
-                            enabled = !saving
-                        ) { Text("−", style = MaterialTheme.typography.titleLarge) }
-                        Text(quantity.toString(), modifier = Modifier.widthIn(min = 20.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold)
-                        IconButton(
-                            onClick = { onChangeOfferingQuantity(offer.id, quantity + 1) },
-                            enabled = quantity < 10 && !saving
-                        ) { Icon(Icons.Default.Add, contentDescription = "Add one ${offer.title}") }
+                        OutlinedButton(
+                            onClick = { onChangeOfferingQuantity(offer.id, 0) },
+                            enabled = !saving,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                        ) { Text("Remove") }
                     }
                 }
             }
@@ -705,7 +698,7 @@ fun AdaptiveBookingSheet(
 							onChangeOfferingQuantity = { offeringId, quantity ->
 								useListingPriceSelection = false
 								if (quantity <= 0) selectedOfferingQuantities.remove(offeringId)
-								else selectedOfferingQuantities[offeringId] = quantity.coerceAtMost(10)
+                                else selectedOfferingQuantities[offeringId] = 1
 								error = null
 							},
 							onSelectListingPrice = {

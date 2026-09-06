@@ -29,7 +29,7 @@ class AdaptiveBookingSheetScopePresentationTest {
     }
 
     @Test
-    fun `package scope keeps quantities visible`() {
+    fun `package scope always displays one of each work item`() {
         val offer = ProviderServiceOffering(
             id = "offer-1", title = "Replace tap washer", priceAmount = 149.0,
             durationMinutes = 25, quantity = 2
@@ -39,14 +39,14 @@ class AdaptiveBookingSheetScopePresentationTest {
             durationMinutes = 50, items = listOf(offer)
         )
 
-        assertEquals("2 x Replace tap washer", providerPackageItemsLabel(pack))
-        assertEquals(298.0, providerPackageItemsTotal(pack), 0.001)
+        assertEquals("Replace tap washer", providerPackageItemsLabel(pack))
+        assertEquals(149.0, providerPackageItemsTotal(pack), 0.001)
         assertEquals(0.0, providerPackageSavings(pack), 0.001)
         assertTrue(providerOfferingCustomerDetails(offer).isEmpty())
     }
 
     @Test
-    fun `package savings compares its exact item quantities`() {
+    fun `package savings compares its individual work items`() {
         val pack = ProviderServicePackage(
             id = "package-1", name = "Kitchen refresh", packagePriceAmount = 399.0,
             durationMinutes = 50,
@@ -56,8 +56,8 @@ class AdaptiveBookingSheetScopePresentationTest {
             )
         )
 
-        assertEquals(448.0, providerPackageItemsTotal(pack), 0.001)
-        assertEquals(49.0, providerPackageSavings(pack), 0.001)
+        assertEquals(299.0, providerPackageItemsTotal(pack), 0.001)
+        assertEquals(0.0, providerPackageSavings(pack), 0.001)
     }
 
     @Test
@@ -70,10 +70,10 @@ class AdaptiveBookingSheetScopePresentationTest {
     }
 
     @Test
-    fun `individual cart payload is deterministic and keeps quantities`() {
+    fun `individual cart payload is deterministic and requires one quantity`() {
         val payload = customerServiceSelectionPayload(
             packageId = null,
-            offeringQuantities = linkedMapOf("offer-b" to 2, "offer-a" to 1),
+            offeringQuantities = linkedMapOf("offer-b" to 1, "offer-a" to 1),
             useListingPrice = false
         )!!
         val items = payload.getAsJsonArray("items")
@@ -82,19 +82,20 @@ class AdaptiveBookingSheetScopePresentationTest {
         assertEquals("offer-a", items[0].asJsonObject.get("offering_id").asString)
         assertEquals(1, items[0].asJsonObject.get("quantity").asInt)
         assertEquals("offer-b", items[1].asJsonObject.get("offering_id").asString)
-        assertEquals(2, items[1].asJsonObject.get("quantity").asInt)
+        assertEquals(1, items[1].asJsonObject.get("quantity").asInt)
     }
 
     @Test
     fun `package and individual extras share one provider cart payload`() {
-        val payload = customerServiceSelectionPayload("package-1", mapOf("offer-1" to 2), false)!!
+        val payload = customerServiceSelectionPayload("package-1", mapOf("offer-1" to 1), false)!!
         assertEquals("package-1", payload.get("package_id").asString)
-        assertEquals(2, payload.getAsJsonArray("items")[0].asJsonObject.get("quantity").asInt)
+        assertEquals(1, payload.getAsJsonArray("items")[0].asJsonObject.get("quantity").asInt)
     }
 
     @Test
     fun `invalid or custom mixed cart modes cannot be submitted`() {
         assertNull(customerServiceSelectionPayload(null, mapOf("offer-1" to 0), false))
+        assertNull(customerServiceSelectionPayload(null, mapOf("offer-1" to 2), false))
         assertNull(customerServiceSelectionPayload(null, emptyMap(), false))
         assertNull(customerServiceSelectionPayload("package-1", emptyMap(), true))
     }
@@ -110,13 +111,13 @@ class AdaptiveBookingSheetScopePresentationTest {
         )
 
         val summary = customerServiceCartSummary(
-            catalog, null, mapOf("offer-1" to 2, "offer-2" to 1), false, 500.0, 60
+            catalog, null, mapOf("offer-1" to 1, "offer-2" to 1), false, 500.0, 60
         )!!
 
         assertEquals("ITEMS", summary.kind)
-        assertEquals(3, summary.itemCount)
-        assertEquals(400.0, summary.providerAmount, 0.001)
-        assertEquals(55, summary.durationMinutes)
+        assertEquals(2, summary.itemCount)
+        assertEquals(250.0, summary.providerAmount, 0.001)
+        assertEquals(35, summary.durationMinutes)
     }
 
     @Test
@@ -132,12 +133,12 @@ class AdaptiveBookingSheetScopePresentationTest {
             offerings = listOf(extra), packages = listOf(pack)
         )
 
-        val summary = customerServiceCartSummary(catalog, pack.id, mapOf(extra.id to 2), false, 0.0, 60)!!
+        val summary = customerServiceCartSummary(catalog, pack.id, mapOf(extra.id to 1), false, 0.0, 60)!!
 
         assertEquals("MIXED", summary.kind)
-        assertEquals(3, summary.itemCount)
-        assertEquals(700.0, summary.providerAmount, 0.001)
-        assertEquals(90, summary.durationMinutes)
+        assertEquals(2, summary.itemCount)
+        assertEquals(600.0, summary.providerAmount, 0.001)
+        assertEquals(75, summary.durationMinutes)
     }
 
     @Test

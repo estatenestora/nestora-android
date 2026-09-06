@@ -9,21 +9,21 @@ import org.junit.Test
 
 class ProviderPackageItemPayloadTest {
     @Test
-    fun `package payload preserves each provider selected quantity and listing order`() {
+    fun `package payload includes each selected work item once and in listing order`() {
         val offers = listOf(
             ProviderServiceOffering(id = "washer", title = "Washer", priceAmount = 99.0, durationMinutes = 10),
             ProviderServiceOffering(id = "valve", title = "Valve", priceAmount = 149.0, durationMinutes = 20),
             ProviderServiceOffering(id = "tap", title = "Tap", priceAmount = 249.0, durationMinutes = 25)
         )
 
-        val payload = providerPackageItemPayloads(offers, mapOf("valve" to 2, "tap" to 5, "washer" to 0))
+        val payload = providerPackageItemPayloads(offers, mapOf("valve" to 1, "tap" to 1, "washer" to 0))
 
         assertEquals(2, payload.size())
         assertEquals("valve", payload[0].asJsonObject["offering_id"].asString)
-        assertEquals(2, payload[0].asJsonObject["quantity"].asInt)
+        assertEquals(1, payload[0].asJsonObject["quantity"].asInt)
         assertEquals(0, payload[0].asJsonObject["display_order"].asInt)
         assertEquals("tap", payload[1].asJsonObject["offering_id"].asString)
-        assertEquals(5, payload[1].asJsonObject["quantity"].asInt)
+        assertEquals(1, payload[1].asJsonObject["quantity"].asInt)
     }
 
     @Test

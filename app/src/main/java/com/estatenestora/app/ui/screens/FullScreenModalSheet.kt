@@ -128,7 +128,7 @@ fun FilterOverlaySheet(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val drawerTopGap = 54.dp
+    val drawerTopGap = 44.dp
     val density = LocalDensity.current
     val dismissThresholdPx = with(density) { 120.dp.toPx() }
     var drawerOffsetY by remember { mutableFloatStateOf(0f) }
@@ -148,8 +148,8 @@ fun FilterOverlaySheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxSize()
-                    // The close control ends at statusBarHeight + 46.dp.
-                    // Starting the drawer at +54.dp leaves a compact 8.dp gap.
+                    // A 36.dp close control starting at +4.dp ends at +40.dp;
+                    // the drawer starts at +44.dp, preserving the reference's 4.dp gap.
                     .padding(top = statusBarHeight + drawerTopGap)
                     .offset { IntOffset(0, drawerOffsetY.roundToInt()) }
                     .draggable(
@@ -211,8 +211,8 @@ fun FilterOverlaySheet(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .statusBarsPadding()
-                    .padding(top = 6.dp, end = 16.dp)
-                    .size(40.dp)
+                    .padding(top = 4.dp, end = 16.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
                     .background(Color.White)
             ) {
@@ -220,7 +220,7 @@ fun FilterOverlaySheet(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Close filters",
                     tint = Color(0xFF17201C),
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

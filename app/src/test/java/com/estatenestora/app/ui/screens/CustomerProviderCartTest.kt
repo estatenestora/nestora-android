@@ -29,13 +29,32 @@ class CustomerProviderCartTest {
     )
 
     @Test
+    fun `custom package services remain single-unit selections`() {
+        val quantities = customerPackageItemSelection(catalog, mapOf(offer.id to 1), mapOf(offer.id to 3))
+        val cart = customerCartFromSelection(listing, catalog, null, quantities, false)!!
+        assertEquals(1, quantities[offer.id])
+        assertEquals(100.0, cart.providerAmount, 0.001)
+        assertEquals(15, cart.durationMinutes)
+    }
+
+    @Test
+    fun `custom package selection excludes unavailable or package only services`() {
+        val inactive = offer.copy(id = "inactive", isActive = false)
+        val quantities = customerPackageItemSelection(
+            catalog.copy(offerings = listOf(offer, inactive)), emptyMap(),
+            mapOf("base" to 1, "inactive" to 1, offer.id to 2)
+        )
+        assertEquals(mapOf(offer.id to 1), quantities)
+    }
+
+    @Test
     fun `cart combines package and extras but stays provider scoped`() {
         val cart = customerCartFromSelection(
-            listing, catalog, pack.id, mapOf(offer.id to 2), useListingPrice = false
+            listing, catalog, pack.id, mapOf(offer.id to 1), useListingPrice = false
         )!!
 
-        assertEquals(3, cart.itemCount)
-        assertEquals(700.0, cart.providerAmount, 0.001)
+        assertEquals(2, cart.itemCount)
+        assertEquals(600.0, cart.providerAmount, 0.001)
         assertTrue(customerCartMatchesCatalog(cart, catalog))
         assertFalse(customerCartMatchesCatalog(cart, catalog.copy(providerId = "provider-2")))
         assertFalse(customerCartMatchesCatalog(cart, catalog.copy(serviceTypeId = "electrician-id")))

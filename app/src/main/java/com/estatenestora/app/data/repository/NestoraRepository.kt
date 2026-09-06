@@ -671,18 +671,6 @@ class NestoraRepository {
         0.0
     }
 
-    suspend fun addWalletBalance(amount: Double): Double = withContext(Dispatchers.IO) {
-        try {
-            val response = sendBridgeQuery("ADD_WALLET_BALANCE::${amount}")
-            if (response != null && response.ok) {
-                return@withContext response.walletBalance ?: 0.0
-            }
-        } catch (e: Throwable) {
-            Log.e("NestoraRepo", "[Inline] ADD_WALLET_BALANCE error", e)
-        }
-        0.0
-    }
-
     // =========================================================================
     // PROFILE — update (uses compact JSON to stay well within 512-char limit)
     // =========================================================================
@@ -1564,6 +1552,22 @@ class NestoraRepository {
 
     suspend fun rejectAdminAdvance(bookingId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         sendBridgeQuery("ADMIN_REJECT_ADVANCE::$bookingId")
+    }
+
+    suspend fun createWalletTopUp(amount: Double): WalletTopUp? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("CREATE_WALLET_TOPUP::${"%.2f".format(Locale.US, amount)}")?.takeIf { it.ok }?.walletTopUp
+    }
+
+    suspend fun reportWalletTopUp(topUpId: String, upiTransactionId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("REPORT_WALLET_TOPUP::$topUpId::${upiTransactionId.trim()}")
+    }
+
+    suspend fun approveWalletTopUp(topUpId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("ADMIN_APPROVE_WALLET_TOPUP::$topUpId")
+    }
+
+    suspend fun rejectWalletTopUp(topUpId: String): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
+        sendBridgeQuery("ADMIN_REJECT_WALLET_TOPUP::$topUpId")
     }
 
     /**

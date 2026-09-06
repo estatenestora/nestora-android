@@ -39,6 +39,7 @@ Push-Location $projectRoot
 try {
     foreach ($abi in $devicesByAbi.Keys) {
         Write-Host "Building the smallest debug APK for $abi..."
+        Remove-Item -Recurse -Force "$projectRoot\build\reports" -ErrorAction SilentlyContinue
         & .\gradlew.bat :app:assembleDebug --offline --no-build-cache "-Pandroid.injected.build.abi=$abi"
         if ($LASTEXITCODE -ne 0) { throw "Debug build failed for ABI $abi." }
 

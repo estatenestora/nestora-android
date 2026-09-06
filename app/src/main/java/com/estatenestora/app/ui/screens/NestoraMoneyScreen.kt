@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +31,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.estatenestora.app.data.model.WalletTopUp
 import kotlinx.coroutines.launch
 
 @Composable
@@ -283,15 +286,45 @@ fun NestoraMoneyScreen(
 @Composable
 fun AddBalanceScreen(
     onBack: () -> Unit,
-    onBalanceAdded: (Double) -> Unit,
     getWalletBalance: suspend () -> Double,
-    addWalletBalance: suspend (Double) -> Double
+    userUpiId: String,
+    onCreateTopUp: suspend (Double) -> WalletTopUp?,
+    onReportTopUp: suspend (String, String) -> String?,
+    onSetUpiId: () -> Unit
 ) {
     val context = LocalContext.current
     val strings = com.estatenestora.app.ui.theme.LocalNestoraStrings.current
     var currentBalance by remember { mutableStateOf(0.0) }
     var enterAmount by remember { mutableStateOf("250") }
+    var showUpiSetupRequired by remember { mutableStateOf(false) }
+    var pendingTopUp by remember { mutableStateOf<WalletTopUp?>(null) }
+    var topUpMessage by remember { mutableStateOf<String?>(null) }
+    var isStartingPayment by remember { mutableStateOf(false) }
+    var isSubmittingReference by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    val upiResultLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val topUp = pendingTopUp ?: return@rememberLauncherForActivityResult
+        val response = result.data?.getStringExtra("response") ?: result.data?.dataString.orEmpty()
+        val responseValues = response.split('&', ';').mapNotNull { part ->
+            val keyValue = part.split('=', limit = 2)
+            keyValue.takeIf { it.size == 2 }?.let { Uri.decode(it[0]).lowercase() to Uri.decode(it[1]) }
+        }.toMap()
+        val status = responseValues["status"].orEmpty()
+        val reference = responseValues["txnid"] ?: responseValues["approvalrefno"] ?: responseValues["txnref"].orEmpty()
+        if (status.equals("success", ignoreCase = true) && reference.length >= 6) {
+            scope.launch {
+                isSubmittingReference = true
+                topUpMessage = onReportTopUp(topUp.id, reference)
+                    ?: "Payment was opened. Nestora will verify the receiving-bank record before adding any balance."
+                pendingTopUp = null
+                isSubmittingReference = false
+            }
+        } else {
+            pendingTopUp = null
+            topUpMessage = "Nestora will verify the receiving-bank record before adding any balance."
+        }
+    }
 
     LaunchedEffect(Unit) {
         scope.launch {
@@ -299,6 +332,20 @@ fun AddBalanceScreen(
         }
     }
 
+    if (showUpiSetupRequired) {
+        AlertDialog(
+            onDismissRequest = { showUpiSetupRequired = false },
+            title = { Text("Set your UPI ID first") },
+            text = { Text("Add a valid UPI ID in Edit Profile before requesting a Nestora Money top-up.") },
+            confirmButton = {
+                Button(onClick = {
+                    showUpiSetupRequired = false
+                    onSetUpiId()
+                }) { Text("Edit profile") }
+            },
+            dismissButton = { TextButton(onClick = { showUpiSetupRequired = false }) { Text("Not now") } }
+        )
+    }
     Scaffold(
         modifier = Modifier.fillMaxSize().background(Color(0xFFF7F7F7)),
         topBar = {
@@ -449,6 +496,24 @@ fun AddBalanceScreen(
                         }
                     }
                 }
+                pendingTopUp?.let { topUp ->
+                    Spacer(Modifier.height(12.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
+                        border = BorderStroke(1.dp, Color(0xFFF4D58D))
+                    ) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text("Payment request created", fontWeight = FontWeight.Bold)
+                            Text("Reference: ${topUp.requestReference}", fontSize = 12.sp)
+                            Text("Your wallet remains unchanged until Nestora verifies the receiving-bank payment.", fontSize = 12.sp, color = Color(0xFF6B5B2A))
+                        }
+                    }
+                }
+                topUpMessage?.let { message ->
+                    Text(message, color = Color(0xFF137333), fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                }
             }
 
             // Bottom Proceed button
@@ -460,39 +525,48 @@ fun AddBalanceScreen(
                 Button(
                     onClick = {
                         val amountVal = enterAmount.toDoubleOrNull() ?: 0.0
-                        if (amountVal > 0) {
-                            val upiUriString = "upi://pay" +
-                                    "?pa=ritesh249@slc" +
-                                    "&pn=${Uri.encode("Nestora")}" +
-                                    "&am=${amountVal}" +
-                                    "&cu=INR" +
-                                    "&tn=${Uri.encode("Load Nestora Money")}" +
-                                    "&tr=txn_${System.currentTimeMillis()}"
+                        if (userUpiId.isBlank()) {
+                            showUpiSetupRequired = true
+                    } else if (amountVal > 0 && amountVal <= 50000) {
+                        scope.launch {
+                            isStartingPayment = true
+                            topUpMessage = null
+                            val topUp = onCreateTopUp(amountVal)
+                            isStartingPayment = false
+                            if (topUp == null) {
+                                topUpMessage = "Could not start the payment. Please try again."
+                                return@launch
+                            }
+                            pendingTopUp = topUp
+                            val upiUri = Uri.Builder()
+                                .scheme("upi")
+                                .authority("pay")
+                                .appendQueryParameter("pa", topUp.merchantUpiId)
+                                .appendQueryParameter("pn", "Nestora")
+                                .appendQueryParameter("am", "%.2f".format(topUp.amount))
+                                .appendQueryParameter("cu", "INR")
+                                .appendQueryParameter("tn", "Nestora Money top-up ${topUp.requestReference}")
+                                .appendQueryParameter("tr", topUp.requestReference)
+                                .build()
                             try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(upiUriString))
-                                val chooser = Intent.createChooser(intent, "Pay via UPI App")
-                                context.startActivity(chooser)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "No UPI app found on this device.", Toast.LENGTH_LONG).show()
+                                upiResultLauncher.launch(Intent.createChooser(Intent(Intent.ACTION_VIEW, upiUri), "Pay via UPI app"))
+                            } catch (_: Exception) {
+                                pendingTopUp = null
+                                topUpMessage = "No UPI app was found. No wallet balance was added."
                             }
-
-                            // Trigger backend update to persist balance change
-                            scope.launch {
-                                val newBal = addWalletBalance(amountVal)
-                                Toast.makeText(context, "₹$amountVal added to Nestora Money!", Toast.LENGTH_LONG).show()
-                                onBalanceAdded(newBal)
-                            }
-                        } else {
-                            Toast.makeText(context, "Please enter a valid amount", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                            Toast.makeText(context, "Enter an amount between ₹1 and ₹50,000", Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F7855))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F7855)),
+                    enabled = !isStartingPayment && !isSubmittingReference
                 ) {
-                    Text(strings.moneyProceedToAdd, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(if (isStartingPayment) "Preparing UPI payment..." else strings.moneyProceedToAdd, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }

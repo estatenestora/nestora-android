@@ -1326,8 +1326,8 @@ class MainActivity : ComponentActivity() {
                     "admin_payments" -> {
                         AdminPaymentsScreen(
                             loadQueue = { repository.getAdminPaymentQueue() },
-                            approve = { id -> repository.approveAdminAdvance(id)?.reply },
-                            reject = { id -> repository.rejectAdminAdvance(id)?.reply },
+                            approve = { item -> if (item.paymentKind == "WALLET_TOPUP") repository.approveWalletTopUp(item.bookingId)?.reply else repository.approveAdminAdvance(item.bookingId)?.reply },
+                            reject = { item -> if (item.paymentKind == "WALLET_TOPUP") repository.rejectWalletTopUp(item.bookingId)?.reply else repository.rejectAdminAdvance(item.bookingId)?.reply },
                             onBack = { activeScreen = "main"; selectedTab = 3 }
                         )
                     }
@@ -1361,9 +1361,14 @@ class MainActivity : ComponentActivity() {
                     "add_balance" -> {
                         AddBalanceScreen(
                             onBack = { activeScreen = "nestora_money" },
-                            onBalanceAdded = { activeScreen = "nestora_money" },
                             getWalletBalance = { repository.getWalletBalance() },
-                            addWalletBalance = { amount -> repository.addWalletBalance(amount) }
+                            userUpiId = profile?.upiId.orEmpty(),
+                            onCreateTopUp = { amount -> repository.createWalletTopUp(amount) },
+                            onReportTopUp = { topUpId, transactionId -> repository.reportWalletTopUp(topUpId, transactionId)?.reply },
+                            onSetUpiId = {
+                                activeScreen = "main"
+                                selectedTab = 3
+                            }
                         )
                     }
                     "customer_bookings" -> {
@@ -1606,14 +1611,7 @@ class MainActivity : ComponentActivity() {
                                                  },
                                                 onBack = { selectedTab = 0 },
                                                 onUpdateProfile = { updated ->
-                                                    lifecycleScope.launch {
-                                                        val saved = repository.updateUserProfile(updated)
-                                                        if (saved != null) {
-                                                            profile = saved
-                                                        } else {
-                                                            profile = updated
-                                                        }
-                                                    }
+                                                    repository.updateUserProfile(updated)?.also { saved -> profile = saved }
                                                 },
                                                 onUploadPhoto = { uri ->
                                                     val fileId = repository.uploadProfilePhoto(uri, this@MainActivity)

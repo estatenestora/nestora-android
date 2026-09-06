@@ -2348,7 +2348,6 @@ private fun ProviderMediaManager(
     var assets by remember(target) { mutableStateOf<List<com.estatenestora.app.data.model.MediaAsset>>(emptyList()) }
     var loading by remember(target) { mutableStateOf(false) }
     var feedback by remember(target) { mutableStateOf<String?>(null) }
-    var selectedRole by remember(target) { mutableStateOf("PRIMARY") }
 
     fun reload() {
         if (onFetchMediaAssets == null) return
@@ -2365,7 +2364,9 @@ private fun ProviderMediaManager(
             scope.launch {
                 loading = true
                 feedback = "Optimizing and saving image..."
-                val response = onUploadManagedMedia(uri, target.scope, target.id, selectedRole)
+                val hasCover = assets.any { it.role.uppercase() in setOf("PRIMARY", "COVER", "HERO") }
+                val role = if (hasCover) "GALLERY" else "PRIMARY"
+                val response = onUploadManagedMedia(uri, target.scope, target.id, role)
                 feedback = response.reply
                 loading = false
                 if (response.ok) reload()
@@ -2377,19 +2378,15 @@ private fun ProviderMediaManager(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(target.title, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = Color(0xFF15231D))
         Text(
-            "Primary is the main customer card image. Gallery images show additional work details. Upload JPG, PNG or GIF; Nestora crops and compresses it for each screen.",
+            "Add up to 9 photos. The first becomes the cover shown on customer cards; later photos appear in the carousel. Nestora optimizes each photo for every screen.",
             color = Color(0xFF60756B), fontSize = 12.sp, lineHeight = 17.sp
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = selectedRole == "PRIMARY", onClick = { selectedRole = "PRIMARY" }, label = { Text("Primary") })
-            FilterChip(selected = selectedRole == "GALLERY", onClick = { selectedRole = "GALLERY" }, label = { Text("Gallery") })
-        }
         Button(
             onClick = { picker.launch("image/*") },
-            enabled = !loading && onUploadManagedMedia != null,
+            enabled = !loading && assets.size < 9 && onUploadManagedMedia != null,
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
-        ) { Text(if (selectedRole == "PRIMARY") "Choose primary image" else "Add gallery image", fontWeight = FontWeight.Bold) }
+        ) { Text(if (assets.size >= 9) "Photo limit reached" else "Add photo", fontWeight = FontWeight.Bold) }
         if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = NestoraMint)
         feedback?.let { Text(it, color = Color(0xFF60756B), fontSize = 12.sp) }
         if (!loading && assets.isEmpty()) {
@@ -2429,7 +2426,7 @@ private fun ProviderManagedMediaRow(
                 else Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF60756B))
             }
             Column(Modifier.weight(1f)) {
-                Text(asset.role.lowercase().replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold)
+                Text(if (asset.role.equals("GALLERY", ignoreCase = true)) "Additional photo" else "Cover photo", fontWeight = FontWeight.Bold)
                 val card = asset.variants.firstOrNull { it.variant == "CARD" }
                 Text(card?.let { "${it.width} x ${it.height} optimized" } ?: "Optimized image", color = Color(0xFF60756B), fontSize = 11.sp)
             }
@@ -2470,10 +2467,10 @@ internal fun providerPackageItemPayloads(
     offerings: List<com.estatenestora.app.data.model.ProviderServiceOffering>,
     quantities: Map<String, Int>
 ): com.google.gson.JsonArray = com.google.gson.JsonArray().apply {
-    offerings.filter { offer -> (quantities[offer.id] ?: 0) in 1..25 }.take(25).forEachIndexed { index, offer ->
+    offerings.filter { offer -> quantities[offer.id] == 1 }.take(25).forEachIndexed { index, offer ->
         add(com.google.gson.JsonObject().apply {
             addProperty("offering_id", offer.id)
-            addProperty("quantity", quantities.getValue(offer.id))
+            addProperty("quantity", 1)
             addProperty("display_order", index)
         })
     }
@@ -2611,7 +2608,6 @@ private fun ProviderPackageEditor(
     var description by remember(existing) { mutableStateOf(existing?.description.orEmpty()) }
     var included by remember(existing) { mutableStateOf(existing?.includedText.orEmpty()) }
     var excluded by remember(existing) { mutableStateOf(existing?.excludedText.orEmpty()) }
-    var price by remember(existing) { mutableStateOf(existing?.packagePriceAmount?.toInt()?.toString().orEmpty()) }
     var duration by remember(existing) { mutableStateOf(existing?.durationMinutes?.toString().orEmpty()) }
     var status by remember(existing) { mutableStateOf(existing?.status ?: "DRAFT") }
     var showNewWorkItem by remember(existing?.id) { mutableStateOf(false) }
@@ -2620,7 +2616,7 @@ private fun ProviderPackageEditor(
     val editorScope = rememberCoroutineScope()
     val chosenQuantities = remember(existing?.id) {
         mutableStateMapOf<String, Int>().apply {
-            existing?.items?.forEach { item -> put(item.id, item.quantity.coerceIn(1, 25)) }
+            existing?.items?.forEach { item -> put(item.id, 1) }
         }
     }
     OutlinedTextField(name, { name = it }, label = { Text("Package name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -2665,29 +2661,22 @@ private fun ProviderPackageEditor(
                         color = if (offer.isActive) Color(0xFF60756B) else Color(0xFF8A4B00)
                     )
                 }
-                TextButton(
+                FilterChip(
+                    selected = quantity == 1,
                     onClick = {
-                        if (quantity <= 1) chosenQuantities.remove(offer.id) else chosenQuantities[offer.id] = quantity - 1
+                        if (quantity == 1) chosenQuantities.remove(offer.id)
+                        else if (offer.isActive && chosenQuantities.size < 25) chosenQuantities[offer.id] = 1
                     },
-                    enabled = quantity > 0
-                ) { Text("-") }
-                Text(quantity.toString(), fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 24.dp), textAlign = TextAlign.Center)
-                TextButton(
-                    onClick = {
-                        when {
-                            quantity == 0 && offer.isActive && chosenQuantities.size < 25 -> chosenQuantities[offer.id] = 1
-                            quantity in 1..24 && offer.isActive -> chosenQuantities[offer.id] = quantity + 1
-                        }
-                    },
-                    enabled = offer.isActive && (quantity in 1..24 || (quantity == 0 && chosenQuantities.size < 25))
-                ) { Text("+") }
+                    enabled = quantity == 1 || (offer.isActive && chosenQuantities.size < 25),
+                    label = { Text(if (quantity == 1) "Included" else "Include") }
+                )
             }
         }
     }
     val selectedOffers = offerings.filter { (chosenQuantities[it.id] ?: 0) > 0 }
-    val selectedUnitCount = selectedOffers.sumOf { chosenQuantities[it.id] ?: 0 }
-    val individualTotal = selectedOffers.sumOf { offer -> offer.priceAmount * (chosenQuantities[offer.id] ?: 0) }
-    val individualDuration = selectedOffers.sumOf { offer -> offer.durationMinutes * (chosenQuantities[offer.id] ?: 0) }
+    val selectedUnitCount = selectedOffers.size
+    val individualTotal = selectedOffers.sumOf { it.priceAmount }
+    val individualDuration = selectedOffers.sumOf { it.durationMinutes }
     if (selectedOffers.isNotEmpty()) {
         Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFF0F8F4), modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -2697,16 +2686,17 @@ private fun ProviderPackageEditor(
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-        OutlinedTextField(price, { price = it.filter(Char::isDigit) }, label = { Text("Package price (₹)") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+        OutlinedTextField(
+            value = if (selectedOffers.isEmpty()) "Select work items" else individualTotal.toInt().toString(),
+            onValueChange = {},
+            label = { Text("Package price (₹)") },
+            modifier = Modifier.weight(1f),
+            readOnly = true,
+            singleLine = true
+        )
         OutlinedTextField(duration, { duration = it.filter(Char::isDigit) }, label = { Text("Minutes") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
     }
-    price.toDoubleOrNull()?.takeIf { selectedOffers.isNotEmpty() }?.let { packagePrice ->
-        when {
-            individualTotal > packagePrice -> Text("Customers save ₹${(individualTotal - packagePrice).toInt()} with this package.", fontSize = 12.sp, color = Color(0xFF14513D), fontWeight = FontWeight.SemiBold)
-            individualTotal < packagePrice -> Text("This package is ₹${(packagePrice - individualTotal).toInt()} above the selected items separately.", fontSize = 12.sp, color = Color(0xFF8A4B00))
-            else -> Text("This package matches the selected items' separate total.", fontSize = 12.sp, color = Color(0xFF60756B))
-        }
-    }
+    Text("Package price is calculated from the included individual work items.", fontSize = 12.sp, color = Color(0xFF60756B))
     Text("Package visibility", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
         listOf("DRAFT" to "Draft", "PUBLISHED" to "Published", "PAUSED" to "Paused", "ARCHIVED" to "Archived").forEach { (value, label) ->
@@ -2730,7 +2720,7 @@ private fun ProviderPackageEditor(
             onSave(com.google.gson.JsonObject().apply {
                 if (existing != null) addProperty("id", existing.id)
                 addProperty("name", name); addProperty("description", description); addProperty("included_text", included); addProperty("excluded_text", excluded)
-                addProperty("package_price_amount", price.toDoubleOrNull() ?: -1.0); addProperty("duration_minutes", duration.toIntOrNull() ?: 0)
+                addProperty("package_price_amount", individualTotal); addProperty("duration_minutes", duration.toIntOrNull() ?: 0)
                 addProperty("status", status); addProperty("display_order", existing?.displayOrder ?: 0); add("items", items)
             })
         }, enabled = !saving, modifier = Modifier.fillMaxWidth().height(50.dp), colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
