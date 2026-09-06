@@ -18,6 +18,21 @@ import kotlinx.coroutines.sync.withLock
 internal fun shouldRunBookingListPolling(foregrounded: Boolean, bookingsScreenVisible: Boolean): Boolean =
     foregrounded && bookingsScreenVisible
 
+internal fun shouldRefreshBookingsForRoute(
+    authenticated: Boolean,
+    activeScreen: String,
+    selectedTab: Int
+): Boolean = authenticated && activeScreen == "main" && selectedTab == 2
+
+internal fun shouldRefreshOpenBookingDetailForEvent(activeDetailId: String?, eventBookingId: String): Boolean =
+    activeDetailId != null && activeDetailId == eventBookingId
+
+internal fun shouldRefreshBookingListForEvent(
+    sessionActive: Boolean,
+    foregrounded: Boolean,
+    bookingsScreenVisible: Boolean
+): Boolean = sessionActive && foregrounded && bookingsScreenVisible
+
 /**
  * Adaptive polling for the booking list (My/Sent/Received tabs) and a single
  * booking's detail/tracking screen — one small, single-purpose controller
@@ -33,7 +48,8 @@ internal fun shouldRunBookingListPolling(foregrounded: Boolean, bookingsScreenVi
  * outbound flood limits — but there's still no reason to poll every second
  * while a booking is just sitting in REQUESTED.
  *
- *   - List polling: 20s, only while the Bookings tab is open.
+ *   - List refresh: one full fetch when Bookings opens, immediate FCM-driven
+ *     deltas for changes, and a 60s fallback delta only while that tab is open.
  *   - Detail polling: 15s while the booking is in a passive stage
  *     (REQUESTED/ACCEPTED/PAYMENT), 5s while it's IN_PROGRESS (provider en
  *     route/arrived/OTP/service running) — the parts a Swiggy-style tracker
@@ -48,10 +64,13 @@ class BookingPollingController(
 ) {
     companion object {
         private const val TAG = "BookingPolling"
-        private const val LIST_INTERVAL_MS = 20_000L
+        // FCM is the normal real-time transport. This is intentionally only a
+        // recovery path for missed pushes, so opening Bookings does not create
+        // a permanent high-frequency read load on the database.
+        private const val LIST_INTERVAL_MS = 60_000L
         private const val DETAIL_PASSIVE_INTERVAL_MS = 15_000L
         private const val DETAIL_ACTIVE_INTERVAL_MS = 5_000L
-        private const val MAX_BACKOFF_MS = 60_000L
+        private const val MAX_BACKOFF_MS = 300_000L
         private val ACTIVE_STAGES = setOf("IN_PROGRESS")
         private val TERMINAL_STAGES = setOf("DONE", "ENDED")
     }
@@ -77,12 +96,22 @@ class BookingPollingController(
     private var foregrounded = true
 
     init {
-        // FCM is the normal path for a background booking change. When the app
-        // is visible, consume that event with one refresh — never by starting a
-        // permanent polling loop on unrelated screens.
+        // FCM is the normal path for a booking change. Refresh the list only
+        // when it is actually visible; otherwise the next visible-screen delta
+        // catches it using the saved cursor. An open detail still refreshes
+        // immediately regardless of the list screen.
         scope.launch {
-            NestoraEventBus.bookingUpdates.collect {
-                if (sessionActive && foregrounded) triggerListSync()
+            NestoraEventBus.bookingUpdates.collect { bookingId ->
+                if (shouldRefreshBookingListForEvent(sessionActive, foregrounded, bookingsScreenVisible)) {
+                    triggerListSync()
+                }
+                // A push for the booking the customer is currently viewing
+                // must refresh that detail immediately. Keeping its cached
+                // content visible avoids a blank screen while the latest
+                // status replaces it, including dismissal of the OTP card.
+                if (sessionActive && foregrounded && shouldRefreshOpenBookingDetailForEvent(activeDetailId, bookingId)) {
+                    openDetail(bookingId, clearCache = false)
+                }
             }
         }
     }
@@ -159,7 +188,7 @@ class BookingPollingController(
         mergeSummaries(updates, isFullRefresh = isFullRefresh)
         hasCompletedListSync = true
         // An empty first response must still create a cursor. Otherwise every
-        // 20-second poll remains GET_MY_BOOKINGS forever for new users.
+        // periodic fallback remains GET_MY_BOOKINGS forever for new users.
         if (lastSyncIso == null) lastSyncIso = requestStartedAt
     }
 

@@ -141,7 +141,7 @@ private fun LocationProviderResultsPage(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = NestoraFilterPanelSpacing),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     listOf(
@@ -224,13 +224,17 @@ fun FinderChoiceScreen(
     tabsList: List<com.estatenestora.app.ui.theme.NestoraTab> = emptyList(),
     selectedTabId: String = "finder",
     onTabSelected: (String) -> Unit = {},
+    cartItemCount: Int = 0,
+    onCartClick: () -> Unit = {},
     currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday(),
     // ── Feed params (moved from HomeScreen/Explore tab) ──────────────────────
     listings: List<ServiceListing> = emptyList(),
     isLoadingFeed: Boolean = false,
     onRefreshFeed: () -> Unit = {},
     onListingClick: (ServiceListing) -> Unit = {},
-    onFetchLocationListings: suspend (String) -> List<ServiceListing> = { emptyList() }
+    onFetchLocationListings: suspend (String) -> List<ServiceListing> = { emptyList() },
+    managedBanners: List<com.estatenestora.app.data.model.MediaAsset> = emptyList(),
+    onResolveMedia: suspend (String) -> String? = { null }
 ) {
     val pageSurface = remember(currentTheme) { selectedMenuSurface(currentTheme) }
     var isBottomBarVisible by remember { mutableStateOf(true) }
@@ -239,9 +243,19 @@ fun FinderChoiceScreen(
     var locationListings by remember { mutableStateOf<List<ServiceListing>>(emptyList()) }
     var isLoadingLocationListings by remember { mutableStateOf(false) }
     val locationListingCache = remember { mutableStateMapOf<String, List<ServiceListing>>() }
+    var inlineSearchQuery by remember { mutableStateOf("") }
 
-    val filteredListings = remember(selectedFilter, listings) {
+    val filteredListings = remember(selectedFilter, listings, inlineSearchQuery) {
         listings
+            .filter { listing ->
+                inlineSearchQuery.isBlank() || listOf(
+                    listing.title,
+                    listing.description,
+                    listing.serviceType,
+                    listing.categoryName,
+                    listing.providerName
+                ).any { it.contains(inlineSearchQuery, ignoreCase = true) }
+            }
             .let { if (selectedFilter == "verified") it.filter(ServiceListing::isVerified) else it }
             .let { if (selectedFilter == "top_rated") it.sortedByDescending(ServiceListing::rating) else it }
             .let { if (selectedFilter == "budget") it.sortedBy(ServiceListing::price) else it }
@@ -274,18 +288,18 @@ fun FinderChoiceScreen(
                 listOf(Color(0xFF1565C0), Color(0xFF1E88E5))
             ),
             ServiceShortcut(
-                "Maids &\nCleaning", "Daily & weekly help", "🧹",
-                "maid cleaning service",
+                "Maids &\nHousehold Cleanings", "Daily & weekly help", "🧹",
+                "maid service near me",
                 listOf(Color(0xFF2E7D32), Color(0xFF43A047))
             ),
             ServiceShortcut(
-                "AC Repair\n& Service", "Beat the heat", "❄️",
-                "ac repair service",
+                "Owner Flats", "Find flats directly from owners", "🏡",
+                "flat owners near me",
                 listOf(Color(0xFF00838F), Color(0xFF00ACC1))
             ),
             ServiceShortcut(
-                "Packers &\nMovers", "Stress-free shifting", "📦",
-                "packers and movers",
+                "Laundry Service", "Clean, fresh & hassle-free", "👕",
+                "laundry service near me",
                 listOf(Color(0xFF6A1B9A), Color(0xFF8E24AA))
             )
         )
@@ -328,6 +342,7 @@ fun FinderChoiceScreen(
             onSendMessage = onSendMessage,
             onSendSupportPayload = {},
             onBookListing = onBookListing,
+            onListingClick = onListingClick,
             onClearChat = onClearChat,
             currentLocation = currentLocation,
             onSelectLocationClick = onSelectLocationClick,
@@ -341,10 +356,12 @@ fun FinderChoiceScreen(
             userName = userName
         )
     } else {
+        val showLegacyFinderBottomBar = false
         Scaffold(
             modifier = Modifier.nestedScroll(nestedScrollConnection),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
+            if (showLegacyFinderBottomBar) {
             AnimatedVisibility(
                 visible = isBottomBarVisible,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -422,6 +439,7 @@ fun FinderChoiceScreen(
                     }
                 }
             }
+            }
         }
         }
     ) { innerPadding ->
@@ -463,42 +481,51 @@ fun FinderChoiceScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.White),
+                        .background(Color(0xFFF6F8F7)),
                     verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
                     item {
-                        OnboardingTopBar(
-                            currentLocation = currentLocation,
-                            onSelectLocationClick = onSelectLocationClick,
-                            onProfileClick = onProfileClick,
-                            userPhotoPath = userPhotoPath,
-                            isProviderMode = isProviderMode,
-                            onModeToggle = onModeToggle,
-                            tabsList = tabsList,
-                            selectedTabId = selectedTabId,
-                            onTabSelected = onTabSelected,
-                            currentTheme = currentTheme
-                        )
-                    }
-
-                    if (!isSearchFocused) {
-                        stickyHeader {
-                            OnboardingSearchBar(
-                                searchQuery = "",
-                                onSearchQueryChange = {},
-                                isScrolled = isScrolled,
-                                hasCarouselBelow = true,
-                                onClick = { isSearchFocused = true },
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            HeroCarousel(
+                                theme = "finder",
+                                canvasColor = Color.Transparent,
+                                carouselHeight = standardTopHeroHeight(),
+                                horizontalPadding = 0.dp,
+                                verticalPadding = 0.dp,
+                                cornerRadius = 0.dp
+                                ,managedBanners = managedBanners
+                                ,onResolveMedia = onResolveMedia
+                            )
+                            OnboardingTopBar(
+                                currentLocation = currentLocation,
+                                onSelectLocationClick = onSelectLocationClick,
+                                onProfileClick = onProfileClick,
+                                userPhotoPath = userPhotoPath,
+                                isProviderMode = isProviderMode,
+                                onModeToggle = onModeToggle,
+                                tabsList = tabsList,
+                                selectedTabId = selectedTabId,
+                                onTabSelected = onTabSelected,
+                                modifier = Modifier.align(Alignment.TopCenter),
+                                transparentBackground = true,
                                 currentTheme = currentTheme
                             )
                         }
                     }
 
-                    // Swiggy-style Hero Carousel
-                    item {
-                        HeroCarousel(theme = "finder", canvasColor = pageSurface)
+                    stickyHeader {
+                        OnboardingSearchBar(
+                            searchQuery = inlineSearchQuery,
+                            onSearchQueryChange = { inlineSearchQuery = it },
+                            isScrolled = isScrolled,
+                            hasCarouselBelow = true,
+                            cartItemCount = cartItemCount,
+                            onCartClick = onCartClick,
+                            currentTheme = currentTheme
+                        )
                     }
 
+                    // Swiggy-style Hero Carousel
                     // ══════════════════════════════════════════════════════════════
                     // FINDER TAB — Swiggy-inspired discovery layout
                     // ══════════════════════════════════════════════════════════════
@@ -513,12 +540,33 @@ fun FinderChoiceScreen(
                                 .padding(horizontal = 16.dp, vertical = 20.dp)
                         ) {
                             val firstName = userName?.split(" ")?.firstOrNull() ?: "there"
-                            Text(
-                                text = "$firstName, what do you need?",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = "$firstName, what do you need?",
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                                Surface(
+                                    modifier = Modifier.heightIn(min = 44.dp),
+                                    onClick = { onTabChange(1) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color.White,
+                                    contentColor = NestoraMint
+                                ) {
+                                    Text(
+                                        text = "Ask Nestora",
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                             Spacer(Modifier.height(14.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -754,7 +802,7 @@ fun FinderChoiceScreen(
                                 .fillMaxWidth()
                                 .background(Color.White)
                         ) {
-                            HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 6.dp)
+                            HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
                             Spacer(Modifier.height(16.dp))
                             Row(
                                 modifier = Modifier
@@ -771,7 +819,7 @@ fun FinderChoiceScreen(
                                         color = Color(0xFF0D1A13)
                                     )
                                     Text(
-                                        text = "in ${currentLocation?.substringBefore(",")?.trim() ?: "your area"}",
+                                        text = "Near ${currentLocation?.trim() ?: "in your area"}",
                                         fontSize = 12.sp,
                                         color = NestoraTextMuted
                                     )
@@ -874,12 +922,23 @@ fun FinderChoiceScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
-                                    Text(
-                                        text = "⚡ Looking for specific help?",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF0D1A13)
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = null,
+                                            tint = NestoraMint,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Looking for specific help?",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0D1A13)
+                                        )
+                                    }
                                     Spacer(Modifier.height(4.dp))
                                     Text(
                                         text = "Tap a shortcut above or chat with AI to match with top providers instantly.",

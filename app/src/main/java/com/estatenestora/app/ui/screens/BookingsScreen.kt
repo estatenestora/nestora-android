@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,6 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalConfiguration
 import coil.compose.AsyncImage
 import com.estatenestora.app.data.model.BookingSummary
 import com.estatenestora.app.ui.theme.*
@@ -150,7 +153,7 @@ fun List<BookingSummary>.applyBookingFilter(f: BookingFilterState): List<Booking
 @Composable
 fun BookingFilterSheet(
     current: BookingFilterState,
-    initialCategory: String = "Sort",
+    initialCategory: String = "Booking Status",
     onApply: (BookingFilterState) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -173,53 +176,18 @@ fun BookingFilterSheet(
         "lowest_fee"  to "Lowest fee first"
     )
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color.White,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(top = 12.dp, bottom = 4.dp)
-                    .size(width = 40.dp, height = 4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color(0xFFD0DBD7))
-            )
-        }
+    FilterOverlaySheet(
+        title = "Filter bookings",
+        onDismissRequest = onDismiss
     ) {
-        Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.6f).navigationBarsPadding()) {
-            // Title row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Filter Bookings",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0D1A13)
-                )
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = Color.Gray,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-            HorizontalDivider()
-
-            val filterNavItems = listOf("Sort", "Booking Status", "Service Type", "Fee Range")
-            Row(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            val filterNavItems = listOf("Booking Status", "Service Type", "Fee Range")
+            Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 // Left pane: Navigation
                 LazyColumn(
                     modifier = Modifier
                         .width(135.dp)
                         .fillMaxHeight()
+                        .background(Color(0xFFF5F6F8))
                 ) {
                     items(filterNavItems) { nav ->
                         val isSelected = pendingCategory == nav
@@ -240,6 +208,12 @@ fun BookingFilterSheet(
                         }
                     }
                 }
+
+                VerticalDivider(
+                    modifier = Modifier.fillMaxHeight(),
+                    thickness = 1.dp,
+                    color = FilterPaneDividerColor
+                )
 
                 // Right pane: Options Detail
                 Column(
@@ -362,7 +336,7 @@ fun BookingFilterSheet(
                 }
             }
 
-            HorizontalDivider()
+            HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
 
             // Bottom CTA row (Clear / Apply)
             Row(
@@ -394,21 +368,39 @@ fun BookingFilterSheet(
                     )
                 }
             }
-        }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+fun standardTopHeroHeight(): Dp =
+    (LocalConfiguration.current.screenHeightDp.dp * 0.30f).coerceIn(220.dp, 290.dp)
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 fun HeroCarousel(
     theme: String = "home",
-    canvasColor: Color = Color.Transparent
+    canvasColor: Color = Color.Transparent,
+    carouselHeight: Dp = 172.dp,
+    horizontalPadding: Dp = 12.dp,
+    verticalPadding: Dp = 4.dp,
+    cornerRadius: Dp = 22.dp,
+    managedBanners: List<com.estatenestora.app.data.model.MediaAsset> = emptyList(),
+    onResolveMedia: suspend (String) -> String? = { null }
 ) {
     // Each section shows contextually-relevant banners
     // Direct unique Unsplash URLs per slide — no keyword lookup, guaranteed unique images
-    data class CarouselBanner(val title: String, val subtitle: String, val imageUrl: String)
-    val banners = remember(theme) {
+    data class CarouselBanner(val title: String, val subtitle: String, val imageUrl: String = "", val telegramFileId: String = "", val actionLabel: String = "")
+    val fallbackBanners = remember(theme) {
         when (theme) {
+            "dashboard" -> listOf(
+                CarouselBanner("Run Your Day with Confidence", "Track requests, schedules and active work from one provider dashboard",
+                    "https://images.unsplash.com/photo-1521791136064-7986c2920216?w=800&h=400&fit=crop&q=85"),
+                CarouselBanner("Keep Availability Accurate", "Open only the times you can serve and avoid booking conflicts",
+                    "https://images.unsplash.com/photo-1506784983877-45594efa4cbe?w=800&h=400&fit=crop&q=85"),
+                CarouselBanner("Grow with Better Listings", "Clear pricing and service details help customers choose with confidence",
+                    "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=800&h=400&fit=crop&q=85")
+            )
             "bookings" -> listOf(
                 CarouselBanner("Track All Your Bookings", "Real-time status updates for every service you've booked",
                     "https://images.unsplash.com/photo-1586880244386-8b3e34c8382c?w=800&h=400&fit=crop&q=85"),
@@ -451,8 +443,20 @@ fun HeroCarousel(
             )
         }
     }
+    val banners = remember(managedBanners, fallbackBanners) {
+        managedBanners
+            .filter { it.scope == "APP_CAROUSEL" && it.status == "ACTIVE" }
+            .sortedBy { it.displayOrder }
+            .mapNotNull { asset ->
+                asset.fileIdFor("HERO")?.let { fileId ->
+                    CarouselBanner(asset.title, asset.subtitle, telegramFileId = fileId, actionLabel = asset.actionLabel)
+                }
+            }
+            .ifEmpty { fallbackBanners }
+    }
 
     val actionLabel = when (theme) {
+        "dashboard" -> "View work"
         "bookings" -> "View Bookings"
         "register" -> "Register Now"
         "finder" -> "Find Now"
@@ -463,12 +467,12 @@ fun HeroCarousel(
         modifier = Modifier
             .fillMaxWidth()
             .background(canvasColor)
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
+                .clip(RoundedCornerShape(cornerRadius))
         ) {
             val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { banners.size })
 
@@ -485,12 +489,16 @@ fun HeroCarousel(
                 state = pagerState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(172.dp)
+                    .height(carouselHeight)
             ) { page ->
             val banner = banners[page]
+            var managedPath by remember(banner.telegramFileId) { mutableStateOf<String?>(null) }
+            LaunchedEffect(banner.telegramFileId) {
+                managedPath = banner.telegramFileId.takeIf(String::isNotBlank)?.let { onResolveMedia(it) }
+            }
             Box(modifier = Modifier.fillMaxSize()) {
                 AsyncImage(
-                    model = banner.imageUrl,
+                    model = managedPath ?: banner.imageUrl,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -501,7 +509,8 @@ fun HeroCarousel(
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color.Black.copy(alpha = 0.10f),
+                                    Color.Black.copy(alpha = 0.42f),
+                                    Color.Black.copy(alpha = 0.12f),
                                     Color.Black.copy(alpha = 0.70f)
                                 )
                             )
@@ -527,20 +536,15 @@ fun HeroCarousel(
                         lineHeight = 14.sp
                     )
                     Spacer(Modifier.height(12.dp))
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
+                    Text(
+                        text = banner.actionLabel.ifBlank { actionLabel },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
                         color = Color.White,
-                        shadowElevation = 2.dp,
-                        modifier = Modifier.clickable { }
-                    ) {
-                        Text(
-                            text = actionLabel,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00382B),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
-                        )
-                    }
+                        modifier = Modifier
+                            .clickable { }
+                            .padding(vertical = 6.dp)
+                    )
                 }
             }
         }
@@ -592,30 +596,34 @@ fun BookingsScreen(
     tabsList: List<com.estatenestora.app.ui.theme.NestoraTab> = emptyList(),
     selectedTabId: String = "bookings",
     onTabSelected: (String) -> Unit = {},
-    currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday()
+    currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday(),
+    showHomeChrome: Boolean = true
 ) {
-    val pageSurface = remember(currentTheme) { selectedMenuSurface(currentTheme) }
     // Concluded = stage reached a terminal state (DONE, CANCELLED, or ENDED).
     // Active/in-flight = everything else.
     val concludedStages = setOf("DONE", "CANCELLED", "ENDED")
 
     // Hire mode: "Bookings" tab shows concluded sent bookings; "Sent" shows active sent bookings.
     // Serve mode: "Bookings" tab shows concluded received bookings; "Received" shows active received ones.
-    val concludedBookings = remember(bookings, viewerUserId, isProviderMode) {
-        if (isProviderMode)
-            bookings.filter { it.providerUserId == viewerUserId && it.stage in concludedStages }
-        else
-            bookings.filter { it.customerUserId == viewerUserId && it.stage in concludedStages }
+    // GET_MY_BOOKINGS is already scoped by the backend and carries viewer_role.
+    // Prefer that authoritative field: profile loading can briefly lag behind
+    // the list response, and its UUID must never hide a real booking.
+    val roleBookings = remember(bookings, viewerUserId, isProviderMode) {
+        bookings.filter { bookingBelongsToSelectedRole(it, viewerUserId, isProviderMode) }
     }
-    val activeRoleBookings = remember(bookings, viewerUserId, isProviderMode) {
-        if (isProviderMode)
-            bookings.filter { it.providerUserId == viewerUserId && it.stage !in concludedStages }
-        else
-            bookings.filter { it.customerUserId == viewerUserId && it.stage !in concludedStages }
+    val concludedBookings = remember(roleBookings) {
+        roleBookings.filter { it.stage in concludedStages }
+    }
+    val activeRoleBookings = remember(roleBookings) {
+        roleBookings.filter { it.stage !in concludedStages }
+    }
+    val providerRoleBookings = remember(roleBookings, isProviderMode) {
+        if (isProviderMode) roleBookings else emptyList()
     }
 
     // selectedBookingsTab: 0 = Bookings (concluded), 1 = Sent/Received (active)
-    var selectedBookingsTab by remember { mutableStateOf(0) }
+    var selectedBookingsTab by remember { mutableStateOf(1) }
+    var bookingViewMenuExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearchFocused by remember { mutableStateOf(false) }
     var currentPage by remember { mutableStateOf(0) }
@@ -623,7 +631,7 @@ fun BookingsScreen(
     // Filter sheet states
     var filterState by remember { mutableStateOf(BookingFilterState()) }
     var showFilterSheet by remember { mutableStateOf(false) }
-    var filterSheetCategory by remember { mutableStateOf("Sort") }
+    var filterSheetCategory by remember { mutableStateOf("Booking Status") }
 
     var isBottomBarVisible by remember { mutableStateOf(true) }
     val nestedScrollConnection = remember {
@@ -659,10 +667,12 @@ fun BookingsScreen(
         currentPage = 0
     }
 
+    val showLegacyBookingsBottomBar = false
     Scaffold(
         modifier = Modifier.nestedScroll(nestedScrollConnection),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
+            if (showLegacyBookingsBottomBar) {
             AnimatedVisibility(
                 visible = isBottomBarVisible,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -731,6 +741,7 @@ fun BookingsScreen(
                     }
                 }
             }
+            }
         }
     ) { innerPadding ->
         Box(
@@ -765,7 +776,9 @@ fun BookingsScreen(
             LaunchedEffect(lastVisibleItemIndex.value) {
                 val totalItems = listState.layoutInfo.totalItemsCount
                 if (totalItems > 0 && lastVisibleItemIndex.value >= totalItems - 2) {
-                    val currentListSize = when (selectedBookingsTab) {
+                    val currentListSize = if (isProviderMode) {
+                        providerRoleBookings.size
+                    } else when (selectedBookingsTab) {
                         0 -> {
                             bookings.count {
                                 searchQuery.isBlank() || it.listingTitle.contains(searchQuery, ignoreCase = true) || it.referenceCode.contains(searchQuery, ignoreCase = true)
@@ -785,105 +798,79 @@ fun BookingsScreen(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFFEDF2EE)),
+                    .background(Color(0xFFF6F8F7)),
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
                 // 1. Shared top bar
-                item {
-                    OnboardingTopBar(
-                        currentLocation = currentLocation,
-                        onSelectLocationClick = onSelectLocationClick,
-                        onProfileClick = onProfileClick,
-                        userPhotoPath = userPhotoPath,
-                        isProviderMode = isProviderMode,
-                        onModeToggle = onModeToggle,
-                        tabsList = tabsList,
-                        selectedTabId = selectedTabId,
-                        onTabSelected = onTabSelected,
-                        currentTheme = currentTheme
-                    )
-                }
-
-                // 2. Sticky search bar matching Explore
-                if (!isSearchFocused) {
-                    stickyHeader {
-                        OnboardingSearchBar(
-                            searchQuery = searchQuery,
-                            onSearchQueryChange = { searchQuery = it },
-                            isScrolled = isScrolled,
-                            hasCarouselBelow = true,
-                            onClick = { isSearchFocused = true },
+                if (showHomeChrome) {
+                    item {
+                        OnboardingTopBar(
+                            currentLocation = currentLocation,
+                            onSelectLocationClick = onSelectLocationClick,
+                            onProfileClick = onProfileClick,
+                            userPhotoPath = userPhotoPath,
+                            isProviderMode = isProviderMode,
+                            onModeToggle = onModeToggle,
+                            tabsList = tabsList,
+                            selectedTabId = selectedTabId,
+                            onTabSelected = onTabSelected,
                             currentTheme = currentTheme
+                        )
+                    }
+                } else {
+                    item {
+                        NestoraWorkspaceHeader(
+                            icon = Icons.Default.DateRange,
+                            title = "Bookings"
                         )
                     }
                 }
 
-                // 3. Hero Carousel Banner
-                item {
-                    HeroCarousel(theme = "bookings", canvasColor = pageSurface)
-                }
+                if (showHomeChrome) item { NestoraSectionDivider() }
 
                 // The selected Bookings canvas ends with useful Nestora context,
                 // not with controls. Booking operations remain in the neutral
                 // section below, where they are easier to scan and use.
-                item {
+                if (showHomeChrome) item {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp))
-                            .background(pageSurface)
-                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                            .background(Color.White)
+                            .padding(horizontal = 16.dp, vertical = 18.dp)
                     ) {
                         Text(
-                            text = "Your Nestora service desk",
+                            text = if (isProviderMode) "Manage customer bookings" else "Track your bookings",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
+                            color = Color(0xFF10231B)
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = "Keep verified providers, secure payments and service progress in one place.",
+                            text = if (isProviderMode) {
+                                "Review incoming requests, follow active work and conclude every service from one place."
+                            } else {
+                                "See each request, payment and service update clearly from booking to completion."
+                            },
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
-                            color = Color.White.copy(alpha = 0.84f)
+                            color = Color(0xFF64748B)
                         )
-                        Spacer(Modifier.height(14.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("Verified providers", "Live updates", "Secure payments").forEach { value ->
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = Color.White.copy(alpha = 0.14f),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
-                                ) {
-                                    Text(
-                                        text = value,
-                                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
+
+                item { NestoraSectionDivider() }
 
                 // Booking statistics and filters deliberately sit below the
                 // highlighted canvas in a neutral, task-focused surface.
                 item {
                     val headerText = when {
+                        isProviderMode -> "Bookings"
                         selectedBookingsTab == 0 -> "Bookings"
-                        isProviderMode -> "Received"
                         else -> "Sent"
                     }
                     val descText = when {
-                        selectedBookingsTab == 0 && isProviderMode ->
-                            "Completed and cancelled requests you received"
+                        isProviderMode ->
+                            "Review every customer request from arrival through completion"
                         selectedBookingsTab == 0 ->
                             "Completed and cancelled services you booked"
                         isProviderMode ->
@@ -896,57 +883,91 @@ fun BookingsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(Color.White)
-                            .padding(horizontal = 12.dp, vertical = 12.dp)
                     ) {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(18.dp),
+                            shape = RoundedCornerShape(0.dp),
                             color = Color.White,
-                            shadowElevation = 2.dp
+                            shadowElevation = 0.dp
                         ) {
                             Column(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp)
+                                modifier = Modifier.padding(
+                                    horizontal = 12.dp,
+                                    vertical = if (isProviderMode) 0.dp else 18.dp
+                                )
                             ) {
-                        Text(
-                            text = headerText,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0D1A13)
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = descText,
-                            fontSize = 13.sp,
-                            color = NestoraTextMuted
-                        )
-
-                        // Stats row — only on the Bookings (concluded) tab
-                        if (selectedBookingsTab == 0) {
-                            Spacer(Modifier.height(16.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                StatPill(label = "${concludedBookings.size}", sublabel = "Total")
-                                StatPill(
-                                    label = "${concludedBookings.count { it.stage !in concludedStages }}",
-                                    sublabel = "In Progress"
+                        if (!isProviderMode) Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = headerText,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF0D1A13)
                                 )
-                                StatPill(
-                                    label = "${concludedBookings.count { it.stage == "DONE" }}",
-                                    sublabel = "Completed"
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = descText,
+                                    fontSize = 13.sp,
+                                    color = NestoraTextMuted
                                 )
-                                StatPill(
-                                    label = "${concludedBookings.count { it.stage == "CANCELLED" }}",
-                                    sublabel = "Cancelled"
-                                )
+                            }
+                            if (!isProviderMode) {
+                            Box {
+                                Surface(
+                                    onClick = { bookingViewMenuExpanded = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFFF0F4F2),
+                                    border = BorderStroke(1.dp, Color(0xFFD8E3DE))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (selectedBookingsTab == 1) "Active" else "History",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NestoraMint
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.KeyboardArrowDown,
+                                            contentDescription = "Change booking view",
+                                            tint = NestoraMint,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    }
+                                }
+                                DropdownMenu(
+                                    expanded = bookingViewMenuExpanded,
+                                    onDismissRequest = { bookingViewMenuExpanded = false }
+                                ) {
+                                    bookingWorkspaceViews(isProviderMode).forEach { view ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = view.label,
+                                                    fontWeight = if (selectedBookingsTab == view.tabIndex) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            onClick = {
+                                                selectedBookingsTab = view.tabIndex
+                                                bookingViewMenuExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                             }
                         }
 
+                        // Stats row — only on the Bookings (concluded) view
                         // Filter buttons row (styled like ss1)
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.height(NestoraFilterPanelSpacing))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -974,35 +995,6 @@ fun BookingsScreen(
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (filterState.activeCount > 0) NestoraMint else Color(0xFF333333)
-                                    )
-                                }
-                            }
-
-                            // 2. Sort by Button
-                            Surface(
-                                onClick = {
-                                    filterSheetCategory = "Sort"
-                                    showFilterSheet = true
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, if (filterState.sortOrder != "newest") NestoraMint else Color(0xFFDDE2E9)),
-                                color = if (filterState.sortOrder != "newest") Color(0xFFE8FAF4) else Color.White
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text(
-                                        text = "Sort by",
-                                        fontSize = 12.sp,
-                                        color = if (filterState.sortOrder != "newest") NestoraMint else Color(0xFF333333)
-                                    )
-                                    Icon(
-                                        imageVector = Icons.Default.KeyboardArrowDown,
-                                        contentDescription = null,
-                                        tint = if (filterState.sortOrder != "newest") NestoraMint else Color(0xFF333333),
-                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
@@ -1109,13 +1101,81 @@ fun BookingsScreen(
                                 }
                             }
                         }
+                        if (isProviderMode || selectedBookingsTab == 0) {
+                            Spacer(Modifier.height(NestoraFilterPanelSpacing))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                val statsBookings = if (isProviderMode) providerRoleBookings else concludedBookings
+                                StatPill(label = "${statsBookings.size}", sublabel = "Total")
+                                StatPill(
+                                    label = "${statsBookings.count { it.stage !in concludedStages }}",
+                                    sublabel = "In Progress"
+                                )
+                                StatPill(
+                                    label = "${statsBookings.count { it.stage == "DONE" }}",
+                                    sublabel = "Completed"
+                                )
+                                StatPill(
+                                    label = "${statsBookings.count { it.stage == "CANCELLED" }}",
+                                    sublabel = "Cancelled"
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(NestoraFilterPanelSpacing))
                             }
                         }
                     }
                 }
 
                 // 5. Tab content — 2-tab: 0=Bookings(concluded), 1=Sent/Received(active)
-                when (selectedBookingsTab) {
+                item { NestoraSectionDivider() }
+
+                if (isProviderMode) {
+                    val baseList = providerRoleBookings.filter {
+                        searchQuery.isBlank() ||
+                            it.listingTitle.contains(searchQuery, ignoreCase = true) ||
+                            it.referenceCode.contains(searchQuery, ignoreCase = true)
+                    }
+                    val filteredList = baseList.applyBookingFilter(filterState)
+                    val paginatedList = filteredList.take((currentPage + 1) * 5)
+
+                    if (!shouldShowProviderInbox(hasProviderListings, providerRoleBookings.size)) {
+                        item {
+                            BookingsEmptyState(
+                                emoji = "",
+                                title = "Become a Provider",
+                                body = "Register a service to start receiving booking requests from customers.",
+                                actionLabel = "Register a Service",
+                                onAction = onRegisterServiceClick
+                            )
+                        }
+                    } else if (filteredList.isEmpty()) {
+                        item {
+                            BookingsEmptyState(
+                                emoji = "",
+                                title = "No Matching Bookings",
+                                body = "New and previous customer bookings will appear here. Adjust filters to see more."
+                            )
+                        }
+                    } else {
+                        items(paginatedList, key = { it.id }) { booking ->
+                            Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                                BookingCard(
+                                    booking = booking,
+                                    viewerUserId = viewerUserId,
+                                    onClick = { onBookingClick(booking) },
+                                    onPayClick = onPayClick,
+                                    onCancelClick = onCancelClick,
+                                    onRebookClick = onRebookClick
+                                )
+                            }
+                        }
+                    }
+                } else when (selectedBookingsTab) {
                     0 -> {
                         // Concluded bookings for this role, filtered by search + sheet filters
                         val baseList = concludedBookings.filter {
@@ -1312,7 +1372,11 @@ fun BookingCard(
     onTabSelected: (String) -> Unit = {},
     currentTheme: com.estatenestora.app.ui.theme.RoyalTheme = com.estatenestora.app.ui.theme.RoyalThemeRepository.getThemeForToday()
 ) {
-    val isViewerProvider = viewerUserId != null && booking.providerUserId == viewerUserId
+    // The backend supplies viewer_role with every list row. Falling back to
+    // IDs keeps older cached rows compatible while avoiding a wrong card when
+    // the profile request has not completed yet.
+    val isViewerProvider = booking.viewerRole.equals("PROVIDER", ignoreCase = true) ||
+        (booking.viewerRole.isBlank() && viewerUserId != null && booking.providerUserId == viewerUserId)
     val counterpartLabel = if (isViewerProvider) "Customer" else "Provider"
     val counterpartName = if (isViewerProvider) booking.customerName else booking.providerName
     val isCustomer = viewerUserId != null && booking.customerUserId == viewerUserId
@@ -1408,7 +1472,7 @@ fun BookingCard(
                 }
             }
 
-            HorizontalDivider(color = Color(0xFFF0F2F5), thickness = 1.dp)
+            HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
 
             if (nextStepMessage.isNotBlank()) {
                 Text(
@@ -1418,6 +1482,44 @@ fun BookingCard(
                     color = Color(0xFF486158),
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            booking.serviceScope?.let { scope ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFF3F8F5),
+                    border = BorderStroke(1.dp, Color(0xFFD9E8E0))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = if (scope.kind.equals("PACKAGE", ignoreCase = true)) "Selected package" else "Selected services",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF486158)
+                        )
+                        Text(
+                            text = scope.label,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF15231D),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = buildString {
+                                append("${scope.itemCount} item")
+                                if (scope.itemCount != 1) append("s")
+                                append(" · Provider amount ₹${scope.providerAmount.toInt()} · ${scope.durationMinutes} min")
+                            },
+                            fontSize = 11.sp,
+                            color = Color(0xFF60756B)
+                        )
+                    }
+                }
             }
 
             // Items list style: provider location + customer address rows
@@ -1494,7 +1596,7 @@ fun BookingCard(
 
             // Divider before Ratings (only shown if done)
             if (booking.stage == "DONE") {
-                HorizontalDivider(color = Color(0xFFF0F2F5), thickness = 1.dp)
+                HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
 
                 // Swiggy-style rating columns
                 Row(
@@ -1560,7 +1662,7 @@ fun BookingCard(
                 }
             }
 
-            HorizontalDivider(color = Color(0xFFF0F2F5), thickness = 1.dp)
+            HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
 
             // Button/Footer Actions
             if (isCustomer) {
@@ -1655,7 +1757,7 @@ fun BookingCard(
                     fontWeight = FontWeight.Normal
                 )
                 Text(
-                    text = "Bill Total: ₹${booking.serviceFee.toInt()}",
+                    text = "${if (booking.serviceScope == null) "Starting from" else "Provider amount"}: ₹${(booking.serviceScope?.providerAmount ?: booking.serviceFee).toInt()}",
                     fontSize = 11.sp,
                     color = Color.DarkGray,
                     fontWeight = FontWeight.Bold

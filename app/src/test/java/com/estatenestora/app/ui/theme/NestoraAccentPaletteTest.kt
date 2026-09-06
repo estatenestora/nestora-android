@@ -6,11 +6,12 @@ import org.junit.Test
 
 class NestoraAccentPaletteTest {
     @Test
-    fun `legacy theme keeps the original Nestora mint colour`() {
+    fun `default theme uses the fixed professional Nestora palette`() {
         val legacy = RoyalThemeRepository.legacyMintTheme
 
-        assertEquals(Color(0xFF00382B), legacy.backgroundGradient.first())
-        assertEquals(Color(0xFF00382B), legacy.backgroundGradient.last())
+        assertEquals(Color(0xFF064E3B), legacy.backgroundGradient.first())
+        assertEquals(Color(0xFF0F766E), legacy.backgroundGradient.last())
+        assertEquals(Color(0xFFE7F3EE), legacy.activeTabCardBg)
     }
 
     @Test

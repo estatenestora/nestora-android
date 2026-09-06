@@ -23,8 +23,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun AdminPaymentsScreen(
     loadQueue: suspend () -> List<AdminPaymentReview>,
-    approve: suspend (String) -> String?,
-    reject: suspend (String) -> String?,
+    approve: suspend (AdminPaymentReview) -> String?,
+    reject: suspend (AdminPaymentReview) -> String?,
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -65,7 +65,7 @@ fun AdminPaymentsScreen(
         snackbarHost = { SnackbarHost(SnackbarHostState()) }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text("Review customer advance payments. Updates every 5 seconds.", fontSize = 14.sp, color = Color(0xFF52665C))
+            Text("Verify payments against the receiving-bank record before settling. Updates every 5 seconds.", fontSize = 14.sp, color = Color(0xFF52665C))
             Spacer(Modifier.height(12.dp))
             when {
                 loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -75,9 +75,11 @@ fun AdminPaymentsScreen(
                         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(item.listingTitle.orEmpty().ifBlank { "Service booking" }, fontWeight = FontWeight.Bold)
-                                Text("Order #${item.referenceCode} · ₹${"%.2f".format(item.advanceAmount)} advance", fontSize = 13.sp)
+                                Text("Reference #${item.referenceCode} · ₹${"%.2f".format(item.advanceAmount)} ${if (item.paymentKind == "WALLET_TOPUP") "wallet top-up" else "advance"}", fontSize = 13.sp)
                                 Text("Customer: ${item.customerName}\nProvider: ${item.providerName}", fontSize = 13.sp, color = Color(0xFF52665C))
+                                if (item.paymentKind == "WALLET_TOPUP") Text(if (item.paymentStatus == "CUSTOMER_REPORTED_PAID") "UPI app reported success — verify bank credit" else "Awaiting bank verification", fontSize = 12.sp, color = Color(0xFF52665C))
                                 if (item.paymentScreenshot.orEmpty().isNotBlank()) Text("Payment receipt uploaded", fontSize = 12.sp, color = Color(0xFF137333))
+                                if (item.upiTransactionId.isNotBlank()) Text("UPI transaction ref: ${item.upiTransactionId}", fontSize = 12.sp, color = Color(0xFF52665C))
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     OutlinedButton(onClick = { confirmReject = item }, enabled = processingId == null, modifier = Modifier.weight(1f)) { Text("Reject") }
                                     Button(onClick = { confirmApprove = item }, enabled = processingId == null, modifier = Modifier.weight(1f)) { Text("Settle") }
@@ -92,7 +94,7 @@ fun AdminPaymentsScreen(
     }
     fun decide(item: AdminPaymentReview, approved: Boolean) = scope.launch {
         processingId = item.bookingId
-        message = if (approved) approve(item.bookingId) else reject(item.bookingId)
+        message = if (approved) approve(item) else reject(item)
         processingId = null
         confirmApprove = null; confirmReject = null
         refreshQueue(showLoading = false)

@@ -19,8 +19,12 @@ internal fun topMenuLayer(isSelected: Boolean): TopMenuLayer =
     if (isSelected) {
         TopMenuLayer(scale = 1f, verticalOffsetDp = 0, zIndex = 2f, alpha = 1f)
     } else {
-        TopMenuLayer(scale = 1f, verticalOffsetDp = 0, zIndex = 1f, alpha = 0.92f)
+        TopMenuLayer(scale = 1f, verticalOffsetDp = 0, zIndex = 1f, alpha = 0.72f)
     }
+
+/** A shape cue keeps selection clear even when two theme shades are similar. */
+internal fun topMenuIndicatorColor(isSelected: Boolean): Color =
+    if (isSelected) Color.White else Color.Transparent
 
 /**
  * The header base uses the first (deeper) theme colour. The selected
@@ -30,6 +34,10 @@ internal fun topMenuLayer(isSelected: Boolean): TopMenuLayer =
 internal fun selectedMenuSurface(theme: RoyalTheme): Color =
     theme.backgroundGradient.last()
 
-/** The selected tab must read as part of its page canvas, never as a white tile. */
+/**
+ * The selected tab continues into the selected page canvas. Inactive tabs are
+ * intentionally darker/recessed so the destination is never mistaken for an
+ * unselected card.
+ */
 internal fun topMenuTabBackground(theme: RoyalTheme, isSelected: Boolean): Color =
     if (isSelected) selectedMenuSurface(theme) else theme.inactiveTabCardBg

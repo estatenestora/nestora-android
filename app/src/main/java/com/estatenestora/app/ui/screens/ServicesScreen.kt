@@ -93,7 +93,9 @@ fun ServicesScreen(
     onLoadAllServiceTypes: suspend () -> List<ServiceType>,
     onServiceTypeClick: (ServiceType) -> Unit,
     onSearchClick: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    managedMedia: List<com.estatenestora.app.data.model.MediaAsset> = emptyList(),
+    onResolveMedia: suspend (String) -> String? = { null }
 ) {
     var selectedCategoryIndex by remember { mutableStateOf(0) }
     var allServiceTypes by remember { mutableStateOf<List<ServiceType>>(emptyList()) }
@@ -270,6 +272,10 @@ fun ServicesScreen(
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             items(list) { svc ->
+                                val managedAsset = managedMedia.firstOrNull { it.scope == "SERVICE_TYPE" && it.scopeId == svc.backendId }
+                                val managedFileId = remember(managedAsset?.id) { managedAsset?.fileIdFor("THUMBNAIL") }
+                                var managedPath by remember(managedFileId) { mutableStateOf<String?>(null) }
+                                LaunchedEffect(managedFileId) { managedPath = managedFileId?.let { onResolveMedia(it) } }
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -284,7 +290,7 @@ fun ServicesScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             AsyncImage(
-                                                model = getRealLifeImageUrl(svc.slug),
+                                                model = managedPath ?: getRealLifeImageUrl(svc.slug),
                                                 contentDescription = svc.name,
                                                 modifier = Modifier
                                                     .size(48.dp)

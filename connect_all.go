@@ -52,10 +52,14 @@ func main() {
 		fmt.Printf("📱 Scanning %d IP(s) for Wireless Debugging ports: %v\n", len(candidateIPs), candidateIPs)
 
 		var wg sync.WaitGroup
+		sem := make(chan struct{}, 3) // limit to 3 concurrent IP scans to prevent thread exhaustion
+
 		for _, ip := range candidateIPs {
 			wg.Add(1)
+			sem <- struct{}{} // acquire token
 			go func(targetIP string) {
 				defer wg.Done()
+				defer func() { <-sem }() // release token
 				scanAndConnectIP(targetIP)
 			}(ip)
 		}

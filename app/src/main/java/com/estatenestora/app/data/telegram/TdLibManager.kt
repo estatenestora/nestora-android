@@ -49,11 +49,11 @@ object TdLibManager {
     private val waitingInteractiveInlineRequests = AtomicInteger(0)
     // Telegram must answer an inline query promptly. Bound the full critical
     // section (including waiting for the mutex), otherwise one lost callback
-    // can block every later app request indefinitely.
-    // Search and booking polling share this one Telegram lane. Leave enough
-    // room for a real customer action to get a response after an in-flight
-    // poll has been cancelled or completed on a slow mobile connection.
-    private const val INLINE_QUERY_TIMEOUT_MS = 20_000L
+    // can block every later app request indefinitely. Reads use the short
+    // limit; state-changing commands receive their longer deadline from the
+    // repository so a committed write is not abandoned midway through a slow
+    // bridge response.
+    private const val INLINE_QUERY_TIMEOUT_MS = 8_000L
 
     @Volatile private var initialized = false
     private lateinit var client: Client
@@ -73,6 +73,8 @@ object TdLibManager {
 
     // Pending photo upload callbacks: requestId -> continuation
     private val pendingPhotoResponses = java.util.concurrent.ConcurrentHashMap<String, kotlin.coroutines.Continuation<String?>>()
+    data class ManagedMediaUploadReply(val assetId: String? = null, val error: String? = null)
+    private val pendingManagedMediaResponses = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CancellableContinuation<ManagedMediaUploadReply?>>()
 
     private fun handleUpdate(dbDir: String, update: TdApi.Object) {
         try {
@@ -97,6 +99,23 @@ object TdLibManager {
                                 if ((cont as kotlinx.coroutines.CancellableContinuation<*>).isActive)
                                     @Suppress("UNCHECKED_CAST")
                                     (cont as kotlin.coroutines.Continuation<String?>).resume(fileId)
+                            }
+                        }
+                    }
+                    if (text != null && (text.startsWith("AAPP_MEDIA_DONE::") || text.startsWith("AAPP_MEDIA_ERROR::"))) {
+                        val parts = text.split("::", limit = 3)
+                        if (parts.size == 3) {
+                            val reqId = parts[1]
+                            val continuation = pendingManagedMediaResponses.remove(reqId)
+                            if (continuation?.isActive == true) {
+                                if (parts[0] == "AAPP_MEDIA_DONE") {
+                                    continuation.resume(ManagedMediaUploadReply(assetId = parts[2]))
+                                } else {
+                                    val decodedError = runCatching {
+                                        String(java.util.Base64.getUrlDecoder().decode(parts[2]), Charsets.UTF_8)
+                                    }.getOrDefault("The image could not be processed. Please try another image.")
+                                    continuation.resume(ManagedMediaUploadReply(error = decodedError))
+                                }
                             }
                         }
                     }
@@ -323,10 +342,14 @@ object TdLibManager {
      * @param query  The query string to send (e.g. "AAPP::reqId::plumber in newtown")
      * @return       List of InlineQueryResult (typically InlineQueryResultArticle)
      */
-    suspend fun sendInlineQuery(query: String, isBackground: Boolean = false): Array<TdApi.InlineQueryResult> {
+    suspend fun sendInlineQuery(
+        query: String,
+        isBackground: Boolean = false,
+        timeoutMillis: Long = INLINE_QUERY_TIMEOUT_MS
+    ): Array<TdApi.InlineQueryResult> {
         if (!isBackground) waitingInteractiveInlineRequests.incrementAndGet()
         try {
-            return withTimeout(if (isBackground) 8_000L else INLINE_QUERY_TIMEOUT_MS) {
+            return withTimeout(if (isBackground) 8_000L else timeoutMillis.coerceAtLeast(1_000L)) {
                 var response: Array<TdApi.InlineQueryResult>? = null
                 while (true) {
                     // Never queue a poll ahead of a real search, booking,
@@ -541,6 +564,47 @@ object TdLibManager {
                 if (pendingPhotoResponses.remove(requestId) != null && cont.isActive) {
                     Log.w(TAG, "[PhotoUpload] Timeout for requestId=$requestId")
                     cont.resume(null)
+                }
+            }, timeoutMs)
+        }
+    }
+
+    /** Sends one already memory-bounded image to the backend's authenticated
+     * media pipeline. The backend owns final crop/size policy and returns the
+     * logical media asset ID only after every rendition is safely persisted. */
+    suspend fun sendManagedMediaToBot(
+        localFilePath: String,
+        uploadToken: String,
+        timeoutMs: Long = 60_000L
+    ): ManagedMediaUploadReply? {
+        if (localFilePath.isBlank() || uploadToken.isBlank()) return null
+        val botChatId = awaitBotChatId()
+        val requestId = "media-" + System.currentTimeMillis()
+        return suspendCancellableCoroutine { continuation ->
+            pendingManagedMediaResponses[requestId] = continuation
+            continuation.invokeOnCancellation { pendingManagedMediaResponses.remove(requestId) }
+
+            val photo = TdApi.InputMessagePhoto().apply {
+                this.photo = TdApi.InputFileLocal(localFilePath)
+                this.caption = TdApi.FormattedText("AAPP_MEDIA_UPLOAD::$uploadToken::$requestId", emptyArray())
+                this.width = 0
+                this.height = 0
+            }
+            client.send(TdApi.SendMessage().apply {
+                chatId = botChatId
+                inputMessageContent = photo
+            }) { result ->
+                if (result is TdApi.Error) {
+                    pendingManagedMediaResponses.remove(requestId)
+                    if (continuation.isActive) {
+                        continuation.resume(ManagedMediaUploadReply(error = "Could not upload this image. Check your connection and try again."))
+                    }
+                }
+            }
+
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                if (pendingManagedMediaResponses.remove(requestId) != null && continuation.isActive) {
+                    continuation.resume(ManagedMediaUploadReply(error = "Image processing took too long. Please try again."))
                 }
             }, timeoutMs)
         }

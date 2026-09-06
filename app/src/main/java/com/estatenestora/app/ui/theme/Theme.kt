@@ -32,7 +32,7 @@ private fun lightScheme(theme: RoyalTheme) = lightColorScheme(
     onSecondaryContainer = theme.backgroundGradient.last(),
     tertiary = theme.backgroundGradient.first(),
     onTertiary = Color.White,
-    background = Color(0xFFF8FAFC),
+    background = Color(0xFFF6F8F7),
     onBackground = Color(0xFF0F172A),
     surface = Color.White,
     onSurface = Color(0xFF0F172A),
@@ -76,6 +76,7 @@ fun NestoraTheme(
     CompositionLocalProvider(LocalRoyalTheme provides royalTheme) {
         MaterialTheme(
             colorScheme = colorScheme,
+            typography = NestoraTypography,
             content = content
         )
     }

@@ -48,6 +48,7 @@ fun AIChatScreen(
     onSendMessage: (String) -> Unit,
     onSendSupportPayload: () -> Unit,
     onBookListing: (ServiceListing) -> Unit,
+    onListingClick: (ServiceListing) -> Unit = onBookListing,
     onClearChat: () -> Unit,
     currentLocation: String? = null,
     onSelectLocationClick: () -> Unit = {},
@@ -151,6 +152,7 @@ fun AIChatScreen(
                         ChatMessageItem(
                             message = msg,
                             onBookListing = onBookListing,
+                            onListingClick = onListingClick,
                             userPhotoPath = userPhotoPath
                         )
                     }
@@ -165,7 +167,7 @@ fun AIChatScreen(
                     .navigationBarsPadding()
                     .imePadding()
             ) {
-                HorizontalDivider(color = Color(0xFFE2EAF2), thickness = 1.dp)
+                HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -464,6 +466,7 @@ fun SecondaryCard(
 fun ChatMessageItem(
     message: TelegramChatMessage,
     onBookListing: (ServiceListing) -> Unit = {},
+    onListingClick: (ServiceListing) -> Unit = onBookListing,
     showLocationButton: Boolean = false,
     onLocationButtonClick: () -> Unit = {},
     onSelectLocationClick: () -> Unit = {},
@@ -583,7 +586,7 @@ fun ChatMessageItem(
                     message.attachedListings.forEach { listing ->
                         MarketplaceListingCard(
                             listing = listing,
-                            onClick = { onBookListing(listing) },
+                            onClick = { onListingClick(listing) },
                             onBookViaTelegram = { onBookListing(listing) }
                         )
                         Spacer(Modifier.height(8.dp))

@@ -10,8 +10,20 @@ class DiscoveryRecoveryPolicyTest {
     fun `successful discovery data is fresh only inside its ttl`() {
         val cachedAt = 10_000L
 
-        assertTrue(DiscoveryRecoveryPolicy.isFresh(cachedAt, 54_999L, DiscoveryRecoveryPolicy.FEED_TTL_MS))
-        assertFalse(DiscoveryRecoveryPolicy.isFresh(cachedAt, 55_000L, DiscoveryRecoveryPolicy.FEED_TTL_MS))
+        assertTrue(
+            DiscoveryRecoveryPolicy.isFresh(
+                cachedAt,
+                cachedAt + DiscoveryRecoveryPolicy.FEED_TTL_MS - 1,
+                DiscoveryRecoveryPolicy.FEED_TTL_MS
+            )
+        )
+        assertFalse(
+            DiscoveryRecoveryPolicy.isFresh(
+                cachedAt,
+                cachedAt + DiscoveryRecoveryPolicy.FEED_TTL_MS,
+                DiscoveryRecoveryPolicy.FEED_TTL_MS
+            )
+        )
     }
 
     @Test
@@ -29,5 +41,26 @@ class DiscoveryRecoveryPolicyTest {
         assertEquals(3_000L, DiscoveryRecoveryPolicy.retryDelayMs(consecutiveFailures = 2))
         assertEquals(24_000L, DiscoveryRecoveryPolicy.retryDelayMs(consecutiveFailures = 5))
         assertEquals(24_000L, DiscoveryRecoveryPolicy.retryDelayMs(consecutiveFailures = 20))
+    }
+
+    @Test
+    fun `empty listing results expire sooner than populated results`() {
+        assertEquals(
+            DiscoveryRecoveryPolicy.EMPTY_LIST_TTL_MS,
+            DiscoveryRecoveryPolicy.cacheTtlMs(DiscoveryRecoveryPolicy.FEED_TTL_MS, isEmptyList = true)
+        )
+        assertEquals(
+            DiscoveryRecoveryPolicy.FEED_TTL_MS,
+            DiscoveryRecoveryPolicy.cacheTtlMs(DiscoveryRecoveryPolicy.FEED_TTL_MS, isEmptyList = false)
+        )
+    }
+
+    @Test
+    fun `listing invalidation preserves unrelated catalog cache entries`() {
+        assertTrue(DiscoveryRecoveryPolicy.isListingQuery("GET_MY_LISTINGS"))
+        assertTrue(DiscoveryRecoveryPolicy.isListingQuery("SEARCH_AT::19.076000,72.877700::GET_FEED_SERVICES"))
+        assertTrue(DiscoveryRecoveryPolicy.isListingQuery("SEARCH_CATEGORY::home-services"))
+        assertFalse(DiscoveryRecoveryPolicy.isListingQuery("GET_ALL_SERVICE_TYPES"))
+        assertFalse(DiscoveryRecoveryPolicy.isListingQuery("GET_CATEGORIES"))
     }
 }

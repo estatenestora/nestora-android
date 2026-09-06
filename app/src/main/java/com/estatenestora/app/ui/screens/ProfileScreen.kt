@@ -27,8 +27,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material.icons.outlined.Refresh
@@ -84,12 +84,18 @@ fun ProfileScreen(
     profile: UserProfile,
     onLogout: () -> Unit,
     onBack: () -> Unit,
-    onUpdateProfile: (UserProfile) -> Unit,
+    onUpdateProfile: suspend (UserProfile) -> UserProfile?,
     onUploadPhoto: suspend (android.net.Uri) -> String?,
     onResolvePhoto: suspend (String) -> String?,
     onSearchAddress: suspend (String, Double?, Double?) -> List<GeocodePlace>,
     onReverseGeocode: suspend (Double, Double) -> GeocodePlace?,
-    onAdminPayments: () -> Unit = {}
+    onAdminPayments: () -> Unit = {},
+    onAdminMedia: () -> Unit = {},
+    onNestoraMoneyClick: () -> Unit = {},
+    isProviderMode: Boolean = false,
+    onMyBookings: () -> Unit = {},
+    currentLanguage: NestoraLanguage = NestoraLanguage.English,
+    onLanguageChange: (com.estatenestora.app.ui.theme.NestoraLanguage) -> Unit = {}
 ) {
     val context = LocalContext.current
     
@@ -120,6 +126,9 @@ fun ProfileScreen(
     var showBackConfirmationDialog by remember { mutableStateOf(false) }
     var showLocationPicker by remember { mutableStateOf(false) }
     var isUploadingPhoto by remember { mutableStateOf(false) }
+    var isSavingProfile by remember { mutableStateOf(false) }
+    var showLanguageSheet by remember { mutableStateOf(false) }
+    val strings = com.estatenestora.app.ui.theme.LocalNestoraStrings.current
 
     // Snackbar for styled error/success alerts
     val snackbarHostState = remember { SnackbarHostState() }
@@ -172,8 +181,9 @@ fun ProfileScreen(
         val nameRegex = Regex("^[a-zA-Z\\s]{2,50}$")
         val phoneRegex = Regex("^(\\+91)?[6-9]\\d{9}$")
         val emailRegex = Regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
-        // Standard UPI VPA format: alphanumeric/.-_ before @, bank handle after
+        // Accept a standard UPI VPA or the numeric UPI number format supported by the backend.
         val upiRegex = Regex("^[a-zA-Z0-9.\\-_]{2,256}@[a-zA-Z]{2,64}$")
+        val upiNumberRegex = Regex("^\\d{7,15}$")
 
         when {
             !nameRegex.matches(trimmedName) -> {
@@ -185,27 +195,31 @@ fun ProfileScreen(
             trimmedEmail.isNotEmpty() && !emailRegex.matches(trimmedEmail) -> {
                 showSnack("\u274C Invalid Email: Please enter a valid email address")
             }
-            trimmedUpi.isNotEmpty() && !upiRegex.matches(trimmedUpi) -> {
-                showSnack("\u274C Invalid UPI Number: Format should be yourname@bankhandle (e.g. 9876543210@okaxis)")
+            trimmedUpi.isNotEmpty() && !upiRegex.matches(trimmedUpi) && !upiNumberRegex.matches(trimmedUpi) -> {
+                showSnack("Invalid UPI ID. Use name@bankhandle or a 7-15 digit UPI number.")
             }
             trimmedPic.isNotEmpty() && !isValidImageUrl(trimmedPic) -> {
                 showSnack("\u274C Invalid profile image — please pick a photo from your gallery")
             }
             else -> {
-                try {
-                    val updated = profile.copy(
-                        name = trimmedName,
-                        phone = trimmedPhone,
-                        email = trimmedEmail,
-                        address = editAddress.trim(),
-                        profilePicUrl = trimmedPic,
-                        upiId = trimmedUpi
-                    )
-                    onUpdateProfile(updated)
-                    onSuccess()
-                    showSnack("\u2705 Profile updated successfully!", isError = false)
-                } catch (e: Exception) {
-                    showSnack("\u274C Failed to save profile: ${e.localizedMessage ?: "Unknown error"}")
+                val updated = profile.copy(
+                    name = trimmedName,
+                    phone = trimmedPhone,
+                    email = trimmedEmail,
+                    address = editAddress.trim(),
+                    profilePicUrl = trimmedPic,
+                    upiId = trimmedUpi
+                )
+                isSavingProfile = true
+                coroutineScope.launch {
+                    val saved = runCatching { onUpdateProfile(updated) }.getOrNull()
+                    isSavingProfile = false
+                    if (saved != null) {
+                        onSuccess()
+                        showSnack("Profile updated successfully.", isError = false)
+                    } else {
+                        showSnack("Could not save profile. Check your connection and try again.")
+                    }
                 }
             }
         }
@@ -256,6 +270,7 @@ fun ProfileScreen(
                     text = { Text("You have unsaved changes. Do you want to save them before leaving?") },
                     confirmButton = {
                         Button(
+                            enabled = !isSavingProfile,
                             onClick = {
                                 runValidationAndSave {
                                     showBackConfirmationDialog = false
@@ -264,7 +279,7 @@ fun ProfileScreen(
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
                         ) {
-                            Text("Save", color = Color.White)
+                            Text(if (isSavingProfile) "Saving..." else "Save", color = Color.White)
                         }
                     },
                     dismissButton = {
@@ -336,7 +351,7 @@ fun ProfileScreen(
                         
                         // Small "Save" word button
                         TextButton(
-                            enabled = isFormChanged,
+                            enabled = isFormChanged && !isSavingProfile,
                             onClick = {
                                 runValidationAndSave {
                                     isEditing = false
@@ -348,7 +363,7 @@ fun ProfileScreen(
                             )
                         ) {
                             Text(
-                                text = "Save",
+                                text = if (isSavingProfile) "Saving..." else "Save",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Black
                             )
@@ -695,17 +710,17 @@ fun ProfileScreen(
                             .padding(horizontal = 16.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        QuickActionCard(Icons.Outlined.Place, "Address", modifier = Modifier.weight(1f)) {
+                        QuickActionCard(Icons.Outlined.Place, strings.profileAddress, modifier = Modifier.weight(1f)) {
                             Toast.makeText(context, profile.address?.ifEmpty { "Salt Lake, Sector V, Kolkata" } ?: "Salt Lake, Sector V, Kolkata", Toast.LENGTH_LONG).show()
                         }
-                        QuickActionCard(Icons.Outlined.ShoppingCart, "Payment Modes", modifier = Modifier.weight(1f)) {
+                        QuickActionCard(Icons.Outlined.ShoppingCart, strings.profilePaymentModes, modifier = Modifier.weight(1f)) {
                             Toast.makeText(context, "UPI, Card, Net Banking supported", Toast.LENGTH_SHORT).show()
                         }
-                        QuickActionCard(Icons.Outlined.Refresh, "My Refunds", modifier = Modifier.weight(1f)) {
-                            Toast.makeText(context, "Refund history is empty", Toast.LENGTH_SHORT).show()
+                        QuickActionCard(Icons.Outlined.Refresh, strings.profileMyBookings, modifier = Modifier.weight(1f)) {
+                            onMyBookings()
                         }
-                        QuickActionCard(Icons.Outlined.Lock, "Nestora Wallet", modifier = Modifier.weight(1f)) {
-                            Toast.makeText(context, "Nestora Wallet Balance: ₹0.00", Toast.LENGTH_LONG).show()
+                        QuickActionCard(Icons.Outlined.Lock, strings.profileNestoraMoney, modifier = Modifier.weight(1f)) {
+                            onNestoraMoneyClick()
                         }
                     }
                 }
@@ -751,9 +766,15 @@ fun ProfileScreen(
                                 Toast.makeText(context, "Favourite services and providers", Toast.LENGTH_SHORT).show()
                             }
                             HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
-                            
+
                             VerticalListMenuItem(Icons.Outlined.Share, "Partner Rewards") {
                                 Toast.makeText(context, "Nestora partners overview", Toast.LENGTH_SHORT).show()
+                            }
+                            HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
+
+                            // ── Language Switcher ────────────────────────────────────
+                            VerticalListMenuItem(Icons.Default.Settings, strings.profileLanguage) {
+                                showLanguageSheet = true
                             }
                         }
                     }
@@ -761,6 +782,75 @@ fun ProfileScreen(
 
                 item { Spacer(Modifier.height(32.dp)) }
                 item { ProjectFooter() }
+            }
+        }
+
+        // ── Language Selector Bottom Sheet ───────────────────────────────────
+        if (showLanguageSheet) {
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { showLanguageSheet = false },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 32.dp)
+                ) {
+                    Text(
+                        text = strings.profileChooseLanguage,
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = Color(0xFF0F172A),
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    )
+                    listOf(
+                        com.estatenestora.app.ui.theme.NestoraLanguage.English,
+                        com.estatenestora.app.ui.theme.NestoraLanguage.Hindi,
+                        com.estatenestora.app.ui.theme.NestoraLanguage.Bengali
+                    ).forEach { lang ->
+                        val isSelected = lang == currentLanguage
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onLanguageChange(lang)
+                                    showLanguageSheet = false
+                                }
+                                .background(
+                                    if (isSelected) Color(0xFFE7F3EE) else Color.Transparent,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = lang.nativeName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = lang.displayName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF064E3B),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                        if (lang != com.estatenestora.app.ui.theme.NestoraLanguage.Bengali) {
+                            HorizontalDivider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                        }
+                    }
+                }
             }
         }
 
