@@ -198,4 +198,34 @@ class AdaptiveBookingSheetScopePresentationTest {
         assertEquals("Custom service request", summary.title)
         assertEquals(500.0, summary.providerAmount, 0.001)
     }
+
+    @Test
+    fun `package with multiple items counts as 1 item in cart summary`() {
+        val pack = ProviderServicePackage(
+            id = "package-1", name = "Full bathroom renovation", packagePriceAmount = 1499.0,
+            durationMinutes = 180,
+            items = listOf(
+                ProviderServiceOffering(id = "item-1", title = "Task 1", priceAmount = 300.0, durationMinutes = 30),
+                ProviderServiceOffering(id = "item-2", title = "Task 2", priceAmount = 400.0, durationMinutes = 45),
+                ProviderServiceOffering(id = "item-3", title = "Task 3", priceAmount = 500.0, durationMinutes = 60),
+                ProviderServiceOffering(id = "item-4", title = "Task 4", priceAmount = 400.0, durationMinutes = 45)
+            )
+        )
+        val extra1 = ProviderServiceOffering(id = "extra-1", title = "Extra 1", priceAmount = 100.0, durationMinutes = 15)
+        val extra2 = ProviderServiceOffering(id = "extra-2", title = "Extra 2", priceAmount = 150.0, durationMinutes = 20)
+        val catalog = ListingServiceCatalog(
+            listingId = "listing-1", providerId = "provider-1", serviceTypeId = "plumber",
+            offerings = listOf(extra1, extra2), packages = listOf(pack)
+        )
+
+        // Only package: count must be 1 regardless of having 4 items inside
+        val packageOnlySummary = customerServiceCartSummary(catalog, pack.id, emptyMap(), false, 0.0, 60)!!
+        assertEquals("PACKAGE", packageOnlySummary.kind)
+        assertEquals(1, packageOnlySummary.itemCount)
+
+        // Package + 2 extras: count must be 1 + 2 = 3
+        val mixedSummary = customerServiceCartSummary(catalog, pack.id, mapOf(extra1.id to 1, extra2.id to 1), false, 0.0, 60)!!
+        assertEquals("MIXED", mixedSummary.kind)
+        assertEquals(3, mixedSummary.itemCount)
+    }
 }

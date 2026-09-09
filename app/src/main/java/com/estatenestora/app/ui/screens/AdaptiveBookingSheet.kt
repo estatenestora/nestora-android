@@ -146,7 +146,7 @@ internal fun customerServiceCartSummary(
     if (pack != null) return CustomerServiceCartSummary(
         kind = if (selected.isEmpty()) "PACKAGE" else "MIXED",
         title = if (selected.isEmpty()) pack.name else "${pack.name} + ${selected.size} extra service(s)",
-        itemCount = pack.items.size + selected.size,
+        itemCount = 1 + selected.size,
         providerAmount = pack.packagePriceAmount + selected.sumOf { it.first.priceAmount },
         durationMinutes = pack.durationMinutes + selected.sumOf { it.first.durationMinutes }
     )
@@ -641,16 +641,24 @@ fun AdaptiveBookingSheet(
         }
     }
 
+    val scrollState = rememberScrollState()
+    val bookingPageTitle = when {
+        loading -> "Preparing booking"
+        serviceCatalog?.customerPresentation?.mode == "PROPERTY" -> "Property enquiry"
+        serviceSelectionApplied -> "Choose slot"
+        else -> "Choose services"
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(if (serviceCatalog?.customerPresentation?.mode == "PROPERTY") "Property enquiry" else "Book Service") },
-                navigationIcon = {
-                    IconButton(onClick = onDismiss) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+            StorefrontUrbanCompanyTopBar(
+                title = bookingPageTitle,
+                subtitle = listing.title,
+                isScrolled = true,
+                onBack = onDismiss,
+                showSearch = false,
+                showShare = false,
+                showCart = false
             )
         },
         containerColor = Color.White
@@ -659,12 +667,10 @@ fun AdaptiveBookingSheet(
             Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
+                .verticalScroll(scrollState)
+                .padding(horizontal = 24.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text(listing.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-            Text("by ${listing.providerName}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             if (loading) {
                 Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator(color = NestoraMint) }
             } else {

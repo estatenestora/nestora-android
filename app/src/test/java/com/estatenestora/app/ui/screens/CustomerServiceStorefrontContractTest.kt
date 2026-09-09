@@ -56,4 +56,18 @@ class CustomerServiceStorefrontContractTest {
         assertTrue(startup.contains("serviceSelectionApplied = true"))
         assertTrue(startup.contains("onFetchDraftAvailability("))
     }
+
+    @Test
+    fun `cart and booking pages use compact page headers without storefront carousel`() {
+        val storefront = source("CustomerServiceCatalogScreen.kt")
+        val cartContent = storefront.substringAfter("val loaded = requireNotNull(catalog)")
+            .substringAfter("if (cartOnly) {")
+            .substringBefore("} else {")
+        val booking = source("AdaptiveBookingSheet.kt")
+
+        assertTrue(storefront.contains("title = \"Your cart\""))
+        assertFalse(cartContent.contains("StorefrontUrbanCompanyHero("))
+        assertTrue(booking.contains("serviceSelectionApplied -> \"Choose slot\""))
+        assertFalse(booking.contains("StorefrontUrbanCompanyHero("))
+    }
 }
