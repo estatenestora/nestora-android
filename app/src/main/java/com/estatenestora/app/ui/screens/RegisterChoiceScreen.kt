@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -42,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -2247,6 +2250,7 @@ private fun ProviderPackagesWorkspace(
                     attributeTemplates = attributeTemplates,
                     saving = loading,
                     feedback = feedback?.takeIf { feedbackIsError },
+                    serviceTypeSlug = listing.serviceType,
                     onSave = { payload ->
                         scope.launch {
                             loading = true
@@ -2267,6 +2271,7 @@ private fun ProviderPackagesWorkspace(
                     attributeTemplates = attributeTemplates,
                     saving = loading,
                     feedback = feedback?.takeIf { feedbackIsError },
+                    serviceTypeSlug = listing.serviceType,
                     onCreateOffering = { payload ->
                         val response = onSaveOffering?.invoke(selectedListingId, payload)
                         if (response?.ok == true && response.serviceCatalog != null) {
@@ -2484,7 +2489,309 @@ internal fun newlyCreatedPackageOffering(
     return response.serviceCatalog?.offerings?.firstOrNull { it.id !in previousOfferingIds }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+internal const val WORK_ITEM_OTHER_OPTION = "Other"
+internal const val DEFAULT_WORK_ITEM_DURATION_MINUTES = 60
+internal const val DEFAULT_WORK_ITEM_TITLE = "Work item"
+
+internal fun workItemSupportsOtherOption(key: String): Boolean =
+    key in setOf("property_types", "parking", "amenities")
+
+internal fun workItemUsesSecurityDepositEditor(key: String): Boolean = key == "security_deposit"
+
+internal fun securityDepositYearOptions(): List<Int> = (0..10).toList()
+
+internal fun securityDepositMonthUnitOptions(): List<Int> = (0..12).toList()
+
+internal fun securityDepositYearLabel(years: Int): String = if (years == 1) "1 Year" else "$years Years"
+
+internal fun securityDepositMonthLabel(months: Int): String = if (months == 1) "1 Month" else "$months Months"
+
+internal fun parseCsvAttributeValues(raw: String): List<String> =
+    raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+
+internal data class WorkItemChoiceSelection(
+    val catalogSelected: Set<String>,
+    val extraChips: List<String>,
+    val extraSelected: Set<String>
+)
+
+internal fun encodeWorkItemOtherValue(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return ""
+    return if (trimmed.startsWith("Other:", ignoreCase = true)) trimmed else "Other: $trimmed"
+}
+
+internal fun displayWorkItemOtherValue(stored: String): String =
+    stored.removePrefix("Other:").trim()
+
+internal fun workItemOtherFieldLabel(displayLabel: String): String {
+    val cleaned = displayLabel
+        .replace(Regex("""\s+(Handled|Available|Provided)$""", RegexOption.IGNORE_CASE), "")
+        .trim()
+        .ifBlank { displayLabel.trim() }
+    val singular = when {
+        cleaned.endsWith("ies", ignoreCase = true) -> cleaned.dropLast(3) + "y"
+        cleaned.endsWith("Types", ignoreCase = true) -> cleaned.dropLast(5) + "Type"
+        else -> cleaned
+    }
+    return "Other $singular"
+}
+
+internal fun parseWorkItemChoiceSelection(raw: String, catalogOptions: List<String>): WorkItemChoiceSelection {
+    val catalog = catalogOptions.filter { !it.equals(WORK_ITEM_OTHER_OPTION, ignoreCase = true) }
+    val catalogSet = catalog.toSet()
+    val tokens = parseCsvAttributeValues(raw)
+    val catalogSelected = tokens.filter { it in catalogSet }.toSet()
+    val extraChips = tokens
+        .filter { it !in catalogSet && !it.equals(WORK_ITEM_OTHER_OPTION, ignoreCase = true) }
+        .map { displayWorkItemOtherValue(it) }
+        .filter { it.isNotBlank() }
+        .distinctBy { it.lowercase() }
+    return WorkItemChoiceSelection(
+        catalogSelected = catalogSelected,
+        extraChips = extraChips,
+        extraSelected = extraChips.toSet()
+    )
+}
+
+internal fun encodeWorkItemChoiceValues(
+    catalogSelected: Collection<String>,
+    extraSelected: Collection<String>
+): String {
+    val values = catalogSelected
+        .filter { !it.equals(WORK_ITEM_OTHER_OPTION, ignoreCase = true) }
+        .toMutableList()
+    extraSelected
+        .map { displayWorkItemOtherValue(it) }
+        .filter { it.isNotBlank() }
+        .distinctBy { it.lowercase() }
+        .forEach { values += encodeWorkItemOtherValue(it) }
+    return values.joinToString(", ")
+}
+
+internal fun resolveTemporaryWorkItemChip(
+    catalogOptions: List<String>,
+    extraChips: List<String>,
+    draft: String
+): String? {
+    val label = draft.trim().take(80)
+    if (label.isEmpty() || label.equals(WORK_ITEM_OTHER_OPTION, ignoreCase = true)) return null
+    catalogOptions.firstOrNull { it.equals(label, ignoreCase = true) }?.let { return it }
+    extraChips.firstOrNull { it.equals(label, ignoreCase = true) }?.let { return it }
+    return label
+}
+
+internal data class SecurityDepositSelection(
+    val years: Int = 0,
+    val months: Int = 0,
+    val amount: String = ""
+)
+
+internal fun parseSecurityDepositDuration(part: String): Pair<Int, Int> {
+    val yearMatch = Regex("""(\d+)\s*Years?""", RegexOption.IGNORE_CASE).find(part)
+    val monthMatch = Regex("""(\d+)\s*Months?""", RegexOption.IGNORE_CASE).find(part)
+    return (yearMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0) to (monthMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0)
+}
+
+internal fun encodeSecurityDepositDuration(years: Int, months: Int): String =
+    "${securityDepositYearLabel(years.coerceAtLeast(0))} ${securityDepositMonthLabel(months.coerceAtLeast(0))}"
+
+internal fun parseSecurityDeposit(raw: String): SecurityDepositSelection {
+    val value = raw.trim()
+    if (value.isBlank()) return SecurityDepositSelection()
+    var years = 0
+    var months = 0
+    var amount = ""
+    value.split("+").map { it.trim() }.filter { it.isNotBlank() }.forEach { part ->
+        val digits = part.removePrefix("₹").trim()
+        val looksLikeAmount = digits.all(Char::isDigit) && digits.isNotBlank() &&
+            !part.contains("Year", ignoreCase = true) && !part.contains("Month", ignoreCase = true)
+        if (looksLikeAmount) {
+            amount = digits
+        } else {
+            val duration = parseSecurityDepositDuration(part)
+            years = duration.first
+            months = duration.second
+        }
+    }
+    return SecurityDepositSelection(years = years, months = months, amount = amount)
+}
+
+internal fun encodeSecurityDeposit(years: Int, months: Int, customAmount: String): String {
+    val duration = encodeSecurityDepositDuration(years, months)
+    val amount = customAmount.filter(Char::isDigit)
+    return when {
+        amount.isNotBlank() && (years > 0 || months > 0) -> "$duration + ₹$amount"
+        years > 0 || months > 0 -> duration
+        amount.isNotBlank() -> "₹$amount"
+        else -> duration
+    }
+}
+
+internal fun securityDepositSelectionValid(
+    years: Int,
+    months: Int,
+    customAmount: String,
+    zeroSelected: Boolean = false
+): Boolean =
+    years > 0 || months > 0 || customAmount.filter(Char::isDigit).isNotBlank() || zeroSelected
+
+internal fun defaultWorkItemTitle(existingTitle: String?, dealTypesValue: String?): String {
+    existingTitle?.trim()?.takeIf { it.length >= 2 }?.let { return it.take(140) }
+    val deals = parseCsvAttributeValues(dealTypesValue.orEmpty())
+        .map { it.removePrefix("Other:").trim() }
+        .filter { it.isNotBlank() }
+        .take(3)
+    if (deals.isNotEmpty()) return "Broker · ${deals.joinToString(", ")}".take(140)
+    return DEFAULT_WORK_ITEM_TITLE
+}
+
+internal fun defaultWorkItemDurationMinutes(existingMinutes: Int?): Int =
+    existingMinutes?.takeIf { it in 5..1440 } ?: DEFAULT_WORK_ITEM_DURATION_MINUTES
+
+internal val BROKER_DEAL_TYPE_OPTIONS = listOf("Rent", "Sell")
+internal val BROKER_PROPERTY_TYPE_ADDITIONS = listOf("PG", "Commercial", "Plot")
+private val BROKER_DEAL_TYPE_EXCLUDED = setOf("buy", "pg", "commercial", "plot")
+
+internal fun coerceSingleChoiceCsv(raw: String): String =
+    parseCsvAttributeValues(raw).firstOrNull().orEmpty()
+
+internal fun workItemChoiceIsSingleSelect(key: String, inputType: String): Boolean =
+    inputType == "select" ||
+        key == "deal_types" ||
+        key == "property_types" ||
+        key == "property_types_handled" ||
+        key == "furnishing"
+
+internal fun workItemChoiceChipEnabled(
+    singleSelect: Boolean,
+    thisChosen: Boolean,
+    exclusiveSelectionTaken: Boolean
+): Boolean = !singleSelect || thisChosen || !exclusiveSelectionTaken
+
+internal fun isBrokerWorkItemEditor(serviceTypeSlug: String): Boolean =
+    serviceTypeSlug.equals("broker", ignoreCase = true)
+
+internal fun brokerPriceFieldLabel(dealValues: List<String>): String {
+    val rent = dealValues.any { it.equals("Rent", ignoreCase = true) }
+    val sell = dealValues.any { it.equals("Sell", ignoreCase = true) }
+    return when {
+        rent && !sell -> "Rent Price (₹) *"
+        sell && !rent -> "Selling Price (₹) *"
+        else -> "Price (₹) *"
+    }
+}
+
+internal fun brokerHidesSecurityDeposit(dealValues: List<String>): Boolean =
+    dealValues.any { it.equals("Sell", ignoreCase = true) }
+
+internal fun mergeBrokerPropertyTypeOptions(existing: List<String>?): List<String> {
+    val result = existing.orEmpty()
+        .filter { option ->
+            !option.equals("Buy", ignoreCase = true) &&
+                !option.equals("Rent", ignoreCase = true) &&
+                !option.equals("Sell", ignoreCase = true)
+        }
+        .toMutableList()
+    BROKER_PROPERTY_TYPE_ADDITIONS.forEach { addition ->
+        if (result.none { it.equals(addition, ignoreCase = true) }) {
+            result.add(addition)
+        }
+    }
+    return result.distinctBy { it.lowercase() }
+}
+
+internal fun orderedBrokerWorkItemTemplates(
+    templates: List<com.estatenestora.app.data.model.ServiceAttributeTemplate>,
+    hideSecurityDeposit: Boolean
+): List<com.estatenestora.app.data.model.ServiceAttributeTemplate> {
+    val deal = templates.firstOrNull { it.key == "deal_types" }
+    val prop = templates.firstOrNull { it.key == "property_types" }
+    val security = templates.firstOrNull { it.key == "security_deposit" }
+    val rest = templates.filter { it.key !in setOf("deal_types", "property_types", "security_deposit") }
+    return buildList {
+        deal?.let(::add)
+        prop?.let(::add)
+        if (!hideSecurityDeposit) security?.let(::add)
+        addAll(rest)
+    }
+}
+
+internal fun relocateBrokerDealValuesToPropertyTypes(
+    dealRaw: String,
+    propertyRaw: String,
+    propertyCatalog: List<String>
+): Pair<String, String> {
+    val keptDeals = mutableListOf<String>()
+    val properties = parseCsvAttributeValues(propertyRaw).toMutableList()
+    parseCsvAttributeValues(dealRaw).forEach { value ->
+        val bare = value.removePrefix("Other:").trim()
+        val excluded = BROKER_DEAL_TYPE_EXCLUDED.any { it.equals(value, ignoreCase = true) || it.equals(bare, ignoreCase = true) }
+        if (!excluded) {
+            keptDeals += value
+            return@forEach
+        }
+        if (value.equals("Buy", ignoreCase = true) || bare.equals("Buy", ignoreCase = true)) return@forEach
+        val catalogMatch = propertyCatalog.firstOrNull { it.equals(bare, ignoreCase = true) } ?: bare
+        if (properties.none { it.equals(catalogMatch, ignoreCase = true) }) {
+            properties += catalogMatch
+        }
+    }
+    return keptDeals.joinToString(", ") to properties.joinToString(", ")
+}
+
+internal fun sanitizeBrokerAttributeTemplates(
+    templates: List<com.estatenestora.app.data.model.ServiceAttributeTemplate>
+): List<com.estatenestora.app.data.model.ServiceAttributeTemplate> =
+    templates.map { template ->
+        when (template.key) {
+            "deal_types" -> template.copy(
+                displayLabel = "Deal Types",
+                options = BROKER_DEAL_TYPE_OPTIONS,
+                isRequired = true
+            )
+            "property_types", "property_types_handled" -> template.copy(
+                key = "property_types",
+                displayLabel = "Property Types Handled",
+                options = mergeBrokerPropertyTypeOptions(template.options)
+            )
+            else -> template
+        }
+    }
+
+internal fun workItemAttributeIsInvalid(
+    template: com.estatenestora.app.data.model.ServiceAttributeTemplate,
+    storedValue: String,
+    extraChips: List<String> = emptyList(),
+    otherDraftOpen: Boolean = false,
+    otherDraftText: String = "",
+    depositYears: Int = 0,
+    depositMonths: Int = 0,
+    depositAmount: String,
+    depositZeroSelected: Boolean = false
+): Boolean {
+    if (workItemUsesSecurityDepositEditor(template.key)) {
+        return !securityDepositSelectionValid(depositYears, depositMonths, depositAmount, depositZeroSelected)
+    }
+    if (!workItemSupportsOtherOption(template.key)) {
+        return template.isRequired && storedValue.isBlank()
+    }
+    val catalog = template.options.orEmpty()
+    val parsed = parseWorkItemChoiceSelection(storedValue, catalog)
+    val pendingChip = if (otherDraftOpen) resolveTemporaryWorkItemChip(catalog, extraChips, otherDraftText) else null
+    val extraSelected = parsed.extraSelected.toMutableSet()
+    val catalogSelected = parsed.catalogSelected.toMutableSet()
+    pendingChip?.let { chip ->
+        if (chip in catalog) catalogSelected += chip else extraSelected += chip
+    }
+    if (otherDraftOpen && otherDraftText.isBlank()) {
+        return template.isRequired && catalogSelected.isEmpty() && extraSelected.isEmpty()
+    }
+    if (!template.isRequired) return false
+    return encodeWorkItemChoiceValues(catalogSelected, extraSelected).isBlank()
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun ProviderWorkItemEditor(
     existing: com.estatenestora.app.data.model.ProviderServiceOffering?,
@@ -2492,106 +2799,496 @@ private fun ProviderWorkItemEditor(
     saving: Boolean,
     feedback: String?,
     forceActive: Boolean = false,
+    serviceTypeSlug: String = "",
     onSave: (com.google.gson.JsonObject) -> Unit
 ) {
-    var title by remember(existing) { mutableStateOf(existing?.title.orEmpty()) }
-    var description by remember(existing) { mutableStateOf(existing?.description.orEmpty()) }
-    var price by remember(existing) { mutableStateOf(existing?.priceAmount?.toInt()?.toString().orEmpty()) }
-    var duration by remember(existing) { mutableStateOf(existing?.durationMinutes?.toString().orEmpty()) }
-    var active by remember(existing) { mutableStateOf(existing?.isActive ?: true) }
-    val attributeValues = remember(existing, attributeTemplates) {
-        mutableStateMapOf<String, String>().apply {
-            attributeTemplates.forEach { template ->
-                val saved = existing?.attributeValues?.get(template.key)
-                put(template.key, when {
-                    saved == null || saved.isJsonNull -> ""
-                    saved.isJsonArray -> saved.asJsonArray.joinToString(", ") { it.asString }
-                    saved.isJsonPrimitive -> saved.asString
-                    else -> ""
-                })
+    val isBroker = isBrokerWorkItemEditor(serviceTypeSlug)
+    val sanitizedTemplates = remember(attributeTemplates, isBroker) {
+        if (isBroker) sanitizeBrokerAttributeTemplates(attributeTemplates) else attributeTemplates
+    }
+    var label by remember(existing) { mutableStateOf(existing?.title.orEmpty()) }
+    var price by remember(existing) { mutableStateOf(existing?.priceAmount?.takeIf { it > 0 }?.toInt()?.toString().orEmpty()) }
+    var showValidation by remember(existing) { mutableStateOf(false) }
+    val savedAttributeText = remember(existing, sanitizedTemplates, isBroker) {
+        val raw = sanitizedTemplates.associate { template ->
+            val saved = existing?.attributeValues?.get(template.key)
+            template.key to when {
+                saved == null || saved.isJsonNull -> ""
+                saved.isJsonArray -> saved.asJsonArray.joinToString(", ") { it.asString }
+                saved.isJsonPrimitive -> saved.asString
+                else -> ""
+            }
+        }
+        if (!isBroker) return@remember raw
+        val propertyCatalog = sanitizedTemplates.firstOrNull { it.key == "property_types" }?.options.orEmpty()
+        val relocated = relocateBrokerDealValuesToPropertyTypes(
+            raw["deal_types"].orEmpty(),
+            raw["property_types"].orEmpty(),
+            propertyCatalog
+        )
+        raw.toMutableMap().apply {
+            this["deal_types"] = coerceSingleChoiceCsv(relocated.first)
+            this["property_types"] = coerceSingleChoiceCsv(relocated.second)
+            this["furnishing"] = coerceSingleChoiceCsv(this["furnishing"].orEmpty())
+        }
+    }
+    val attributeValues = remember(existing, sanitizedTemplates) {
+        mutableStateMapOf<String, String>().apply { putAll(savedAttributeText) }
+    }
+    val extraChips = remember(existing, sanitizedTemplates) {
+        mutableStateMapOf<String, SnapshotStateList<String>>().apply {
+            sanitizedTemplates.filter { workItemSupportsOtherOption(it.key) }.forEach { template ->
+                val parsed = parseWorkItemChoiceSelection(
+                    savedAttributeText[template.key].orEmpty(),
+                    template.options.orEmpty()
+                )
+                put(template.key, mutableStateListOf<String>().apply { addAll(parsed.extraChips) })
             }
         }
     }
-    OutlinedTextField(title, { title = it }, label = { Text("Work item name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-    OutlinedTextField(description, { description = it }, label = { Text("What is included") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-        OutlinedTextField(price, { price = it.filter(Char::isDigit) }, label = { Text("Price (₹)") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-        OutlinedTextField(duration, { duration = it.filter(Char::isDigit) }, label = { Text("Minutes") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+    val otherDraftOpen = remember(existing, sanitizedTemplates) { mutableStateMapOf<String, Boolean>() }
+    val otherDraftText = remember(existing, sanitizedTemplates) { mutableStateMapOf<String, String>() }
+    val initialDeposit = remember(existing, sanitizedTemplates) {
+        parseSecurityDeposit(savedAttributeText["security_deposit"].orEmpty())
     }
+    var depositYears by remember(existing, sanitizedTemplates) { mutableStateOf(initialDeposit.years) }
+    var depositMonths by remember(existing, sanitizedTemplates) { mutableStateOf(initialDeposit.months) }
+    var depositAmount by remember(existing, sanitizedTemplates) { mutableStateOf(initialDeposit.amount) }
+    var depositYearsMenuOpen by remember { mutableStateOf(false) }
+    var depositMonthsMenuOpen by remember { mutableStateOf(false) }
+    var depositZeroSelected by remember(existing, sanitizedTemplates) {
+        mutableStateOf(
+            savedAttributeText["security_deposit"].orEmpty().trim() == "0" ||
+                (initialDeposit.years == 0 && initialDeposit.months == 0)
+        )
+    }
+
+    fun currentAttributeValue(template: com.estatenestora.app.data.model.ServiceAttributeTemplate): String {
+        if (workItemUsesSecurityDepositEditor(template.key)) {
+            return encodeSecurityDeposit(depositYears, depositMonths, depositAmount)
+        }
+        if (workItemSupportsOtherOption(template.key)) {
+            val parsed = parseWorkItemChoiceSelection(attributeValues[template.key].orEmpty(), template.options.orEmpty())
+            val pending = resolveTemporaryWorkItemChip(
+                template.options.orEmpty(),
+                extraChips[template.key].orEmpty(),
+                otherDraftText[template.key].orEmpty()
+            ).takeIf { otherDraftOpen[template.key] == true }
+            val extraSelected = parsed.extraSelected.toMutableSet()
+            val catalogSelected = parsed.catalogSelected.toMutableSet()
+            pending?.let { chip ->
+                if (chip in template.options.orEmpty()) catalogSelected += chip else extraSelected += chip
+            }
+            return encodeWorkItemChoiceValues(catalogSelected, extraSelected)
+        }
+        return attributeValues[template.key].orEmpty()
+    }
+
+    val dealTypesTemplate = sanitizedTemplates.firstOrNull { it.key == "deal_types" }
+    val currentDealTypes = dealTypesTemplate?.let { currentAttributeValue(it) }.orEmpty()
+    val dealTypesList = parseCsvAttributeValues(currentDealTypes)
+    val hideSecurityDeposit = isBroker && brokerHidesSecurityDeposit(dealTypesList)
+    val priceLabel = if (isBroker) brokerPriceFieldLabel(dealTypesList) else "Price (₹) *"
+
+    val invalidLabel = showValidation && isBroker && label.trim().isBlank()
+    val invalidPrice = showValidation && price.toDoubleOrNull() == null
+
+    if (isBroker) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = { label = it },
+            label = { Text("Listing title *") },
+            placeholder = { Text("e.g. 2 BHK rent in Andheri") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            isError = invalidLabel,
+            supportingText = if (invalidLabel) {
+                { Text("Listing title is required.", color = Color(0xFFB3261E)) }
+            } else null
+        )
+    }
+
     if (forceActive) {
         Text("This work item will be active and added to the package with quantity 1.", fontSize = 12.sp, color = Color(0xFF14513D), fontWeight = FontWeight.SemiBold)
-    } else {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Switch(checked = active, onCheckedChange = { active = it })
-            Spacer(Modifier.width(8.dp))
-            Text(if (active) "Visible for customer selection" else "Hidden from new customers", fontSize = 12.sp, color = Color(0xFF60756B))
-        }
     }
-    if (attributeTemplates.isNotEmpty()) {
+
+    if (sanitizedTemplates.isNotEmpty()) {
         Text("Service details", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
         Text("Add the details that make this work item clear to customers.", fontSize = 11.sp, color = Color(0xFF60756B))
-        attributeTemplates.forEach { template ->
-            val value = attributeValues[template.key].orEmpty()
-            val label = if (template.isRequired) "${template.displayLabel} *" else template.displayLabel
-            when (template.inputType) {
-                "boolean" -> {
-                    Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF24362E))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Yes" to "true", "No" to "false").forEach { (text, stored) ->
-                            FilterChip(selected = value == stored, onClick = { attributeValues[template.key] = if (value == stored) "" else stored }, label = { Text(text) })
-                        }
-                    }
-                }
-                "select", "multiselect" -> {
-                    val options = template.options.orEmpty()
-                    if (options.isNotEmpty()) {
-                        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF24362E))
-                        val selected = value.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            options.forEach { option ->
-                                val chosen = option in selected
-                                FilterChip(selected = chosen, onClick = {
-                                    val updated = if (template.inputType == "select") {
-                                        if (chosen) emptySet() else setOf(option)
-                                    } else if (chosen) selected - option else selected + option
-                                    attributeValues[template.key] = updated.joinToString(", ")
-                                }, label = { Text(option) })
-                            }
-                        }
-                    } else {
-                        OutlinedTextField(value, { attributeValues[template.key] = it.take(180) }, label = { Text(label) }, supportingText = template.hintText?.let { hint -> { Text(hint) } }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    }
-                }
-                "number" -> OutlinedTextField(value, { input -> if (input.all { it.isDigit() || it == '.' }) attributeValues[template.key] = input }, label = { Text(label) }, supportingText = template.hintText?.let { hint -> { Text(hint) } }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                else -> OutlinedTextField(value, { attributeValues[template.key] = it.take(180) }, label = { Text(label) }, supportingText = template.hintText?.let { hint -> { Text(hint) } }, modifier = Modifier.fillMaxWidth(), singleLine = template.inputType != "text")
+
+        val orderedTemplates = remember(sanitizedTemplates, hideSecurityDeposit, isBroker) {
+            if (isBroker) {
+                orderedBrokerWorkItemTemplates(sanitizedTemplates, hideSecurityDeposit)
+            } else {
+                sanitizedTemplates
             }
         }
+
+        var priceRendered = false
+
+        orderedTemplates.forEach { template ->
+            if (!priceRendered && template.key != "deal_types" && template.key != "property_types") {
+                OutlinedTextField(
+                    price,
+                    { price = it.filter(Char::isDigit) },
+                    label = { Text(priceLabel) },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    isError = invalidPrice,
+                    supportingText = if (invalidPrice) {
+                        { Text("Enter a valid price.") }
+                    } else null
+                )
+                priceRendered = true
+            }
+
+            val value = attributeValues[template.key].orEmpty()
+            val required = template.isRequired || (workItemUsesSecurityDepositEditor(template.key) && !hideSecurityDeposit)
+            val templateLabel = if (required) "${template.displayLabel} *" else template.displayLabel
+            val isDepositKey = workItemUsesSecurityDepositEditor(template.key)
+
+            val invalid = showValidation && if (isDepositKey) {
+                !hideSecurityDeposit && !securityDepositSelectionValid(depositYears, depositMonths, depositAmount, depositZeroSelected)
+            } else {
+                workItemAttributeIsInvalid(
+                    template = template,
+                    storedValue = value,
+                    extraChips = extraChips[template.key].orEmpty(),
+                    otherDraftOpen = otherDraftOpen[template.key] == true,
+                    otherDraftText = otherDraftText[template.key].orEmpty(),
+                    depositYears = depositYears,
+                    depositMonths = depositMonths,
+                    depositAmount = depositAmount,
+                    depositZeroSelected = depositZeroSelected
+                )
+            }
+
+            val errorMessage = if (isDepositKey) {
+                "If there is no security deposit please enter 0 year and 0 months."
+            } else {
+                "Complete this required field."
+            }
+
+            WorkItemFieldSection(invalid = invalid, errorMessage = errorMessage) {
+                when {
+                    isDepositKey -> {
+                        Text(templateLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF24362E))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            ExposedDropdownMenuBox(
+                                expanded = depositYearsMenuOpen,
+                                onExpandedChange = { depositYearsMenuOpen = it },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                OutlinedTextField(
+                                    value = securityDepositYearLabel(depositYears),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("Years") },
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = depositYearsMenuOpen) },
+                                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                                    isError = invalid
+                                )
+                                ExposedDropdownMenu(expanded = depositYearsMenuOpen, onDismissRequest = { depositYearsMenuOpen = false }) {
+                                    securityDepositYearOptions().forEach { option ->
+                                        DropdownMenuItem(
+                                            text = { Text(securityDepositYearLabel(option)) },
+                                            onClick = {
+                                                depositYears = option
+                                                depositYearsMenuOpen = false
+                                                if (depositYears == 0 && depositMonths == 0) depositZeroSelected = true
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                            ExposedDropdownMenuBox(
+                                expanded = depositMonthsMenuOpen,
+                                onExpandedChange = { depositMonthsMenuOpen = it },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                OutlinedTextField(
+                                    value = securityDepositMonthLabel(depositMonths),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("Months") },
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = depositMonthsMenuOpen) },
+                                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                                    isError = invalid
+                                )
+                                ExposedDropdownMenu(expanded = depositMonthsMenuOpen, onDismissRequest = { depositMonthsMenuOpen = false }) {
+                                    securityDepositMonthUnitOptions().forEach { option ->
+                                        DropdownMenuItem(
+                                            text = { Text(securityDepositMonthLabel(option)) },
+                                            onClick = {
+                                                depositMonths = option
+                                                depositMonthsMenuOpen = false
+                                                if (depositYears == 0 && depositMonths == 0) depositZeroSelected = true
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        OutlinedTextField(
+                            depositAmount,
+                            {
+                                depositAmount = it.filter(Char::isDigit).take(12)
+                                if (depositAmount == "0") depositZeroSelected = true
+                            },
+                            label = { Text("Security Amount") },
+                            placeholder = { Text("Security Amount") },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            isError = invalid
+                        )
+                        Text("If there is no security deposit, please enter 0 year and 0 months.", fontSize = 11.sp, color = if (invalid) Color(0xFFB3261E) else Color(0xFF60756B))
+                    }
+                    template.inputType == "boolean" -> {
+                        Text(templateLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF24362E))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("Yes" to "true", "No" to "false").forEach { (text, stored) ->
+                                FilterChip(selected = value == stored, onClick = { attributeValues[template.key] = if (value == stored) "" else stored }, label = { Text(text) })
+                            }
+                        }
+                    }
+                    template.inputType == "select" || template.inputType == "multiselect" -> {
+                        val catalogOptions = template.options.orEmpty().filter { !it.equals(WORK_ITEM_OTHER_OPTION, ignoreCase = true) }
+                        val parsed = parseWorkItemChoiceSelection(value, catalogOptions)
+                        val extras = extraChips[template.key].orEmpty()
+                        val extraSelected = parsed.extraSelected
+                        val selected = parsed.catalogSelected
+                        val singleSelect = workItemChoiceIsSingleSelect(template.key, template.inputType)
+                        val exclusiveSelectionTaken = selected.isNotEmpty() || extraSelected.isNotEmpty() ||
+                            (singleSelect && otherDraftOpen[template.key] == true)
+                        fun writeSelection(catalogSel: Set<String>, extraSel: Set<String>) {
+                            attributeValues[template.key] = encodeWorkItemChoiceValues(catalogSel, extraSel)
+                        }
+                        fun addTemporaryChip() {
+                            val chip = resolveTemporaryWorkItemChip(
+                                catalogOptions,
+                                extras,
+                                otherDraftText[template.key].orEmpty()
+                            ) ?: return
+                            val extraList = extraChips.getOrPut(template.key) { mutableStateListOf() }
+                            if (chip !in catalogOptions && extraList.none { it.equals(chip, ignoreCase = true) }) {
+                                extraList.add(chip)
+                            }
+                            if (singleSelect) {
+                                writeSelection(
+                                    if (chip in catalogOptions) setOf(chip) else emptySet(),
+                                    if (chip in catalogOptions) emptySet() else setOf(chip)
+                                )
+                            } else if (chip in catalogOptions) {
+                                writeSelection(selected + chip, extraSelected)
+                            } else {
+                                writeSelection(selected, extraSelected + chip)
+                            }
+                            otherDraftText[template.key] = ""
+                            otherDraftOpen[template.key] = false
+                        }
+                        Text(templateLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF24362E))
+                        if (catalogOptions.isNotEmpty() || workItemSupportsOtherOption(template.key)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                catalogOptions.forEach { option ->
+                                    val chosen = option in selected
+                                    FilterChip(
+                                        selected = chosen,
+                                        enabled = workItemChoiceChipEnabled(singleSelect, chosen, exclusiveSelectionTaken),
+                                        onClick = {
+                                            if (singleSelect) {
+                                                writeSelection(if (chosen) emptySet() else setOf(option), emptySet())
+                                                otherDraftOpen[template.key] = false
+                                                otherDraftText[template.key] = ""
+                                            } else {
+                                                writeSelection(if (chosen) selected - option else selected + option, extraSelected)
+                                            }
+                                        },
+                                        label = { Text(option) }
+                                    )
+                                }
+                                extras.forEach { option ->
+                                    val chosen = option in extraSelected
+                                    FilterChip(
+                                        selected = chosen,
+                                        enabled = workItemChoiceChipEnabled(singleSelect, chosen, exclusiveSelectionTaken),
+                                        onClick = {
+                                            if (singleSelect) {
+                                                writeSelection(emptySet(), if (chosen) emptySet() else setOf(option))
+                                                otherDraftOpen[template.key] = false
+                                                otherDraftText[template.key] = ""
+                                            } else {
+                                                writeSelection(selected, if (chosen) extraSelected - option else extraSelected + option)
+                                            }
+                                        },
+                                        label = { Text(option) }
+                                    )
+                                }
+                                if (workItemSupportsOtherOption(template.key)) {
+                                    val draftOpen = otherDraftOpen[template.key] == true
+                                    val otherChosen = draftOpen || extraSelected.isNotEmpty()
+                                    FilterChip(
+                                        selected = draftOpen,
+                                        enabled = workItemChoiceChipEnabled(singleSelect, otherChosen, exclusiveSelectionTaken),
+                                        onClick = {
+                                            if (singleSelect && exclusiveSelectionTaken && !otherChosen) return@FilterChip
+                                            val opening = !draftOpen
+                                            otherDraftOpen[template.key] = opening
+                                            if (opening && singleSelect) {
+                                                writeSelection(emptySet(), extraSelected)
+                                            }
+                                            if (!opening) otherDraftText[template.key] = ""
+                                        },
+                                        label = { Text(WORK_ITEM_OTHER_OPTION) }
+                                    )
+                                }
+                            }
+                            if (workItemSupportsOtherOption(template.key) && otherDraftOpen[template.key] == true) {
+                                val otherLabel = workItemOtherFieldLabel(template.displayLabel)
+                                OutlinedTextField(
+                                    otherDraftText[template.key].orEmpty(),
+                                    { input -> otherDraftText[template.key] = input.take(80) },
+                                    label = { Text(otherLabel) },
+                                    placeholder = { Text(otherLabel) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = { addTemporaryChip() }),
+                                    singleLine = true,
+                                    isError = invalid,
+                                    trailingIcon = {
+                                        IconButton(onClick = { addTemporaryChip() }) {
+                                            Icon(Icons.Default.Add, contentDescription = "Add $otherLabel")
+                                        }
+                                    }
+                                )
+                            }
+                        } else {
+                            OutlinedTextField(value, { attributeValues[template.key] = it.take(180) }, label = { Text(templateLabel) }, supportingText = template.hintText?.let { hint -> { Text(hint) } }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        }
+                    }
+                    template.inputType == "number" -> OutlinedTextField(value, { input -> if (input.all { it.isDigit() || it == '.' }) attributeValues[template.key] = input }, label = { Text(templateLabel) }, supportingText = template.hintText?.let { hint -> { Text(hint) } }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, isError = invalid)
+                    else -> OutlinedTextField(value, { attributeValues[template.key] = it.take(180) }, label = { Text(templateLabel) }, supportingText = template.hintText?.let { hint -> { Text(hint) } }, modifier = Modifier.fillMaxWidth(), singleLine = template.inputType != "text", isError = invalid)
+                }
+            }
+        }
+
+        if (!priceRendered) {
+            OutlinedTextField(
+                price,
+                { price = it.filter(Char::isDigit) },
+                label = { Text(priceLabel) },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                isError = invalidPrice,
+                supportingText = if (invalidPrice) {
+                    { Text("Enter a valid price.") }
+                } else null
+            )
+            priceRendered = true
+        }
+    } else {
+        OutlinedTextField(
+            price,
+            { price = it.filter(Char::isDigit) },
+            label = { Text(priceLabel) },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            isError = invalidPrice,
+            supportingText = if (invalidPrice) {
+                { Text("Enter a valid price.") }
+            } else null
+        )
     }
+
     feedback?.let { Text(it, color = Color(0xFFB3261E), fontSize = 12.sp) }
     if (saving) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = NestoraMint)
     Button(
         onClick = {
+            val hasInvalidAttribute = sanitizedTemplates.any { template ->
+                val isDepositKey = workItemUsesSecurityDepositEditor(template.key)
+                if (isDepositKey && hideSecurityDeposit) return@any false
+                if (isDepositKey) {
+                    !securityDepositSelectionValid(depositYears, depositMonths, depositAmount, depositZeroSelected)
+                } else {
+                    workItemAttributeIsInvalid(
+                        template = template,
+                        storedValue = attributeValues[template.key].orEmpty(),
+                        extraChips = extraChips[template.key].orEmpty(),
+                        otherDraftOpen = otherDraftOpen[template.key] == true,
+                        otherDraftText = otherDraftText[template.key].orEmpty(),
+                        depositYears = depositYears,
+                        depositMonths = depositMonths,
+                        depositAmount = depositAmount,
+                        depositZeroSelected = depositZeroSelected
+                    )
+                }
+            }
+            val title = if (isBroker) label.trim() else defaultWorkItemTitle(
+                existing?.title,
+                dealTypesTemplate?.let { currentAttributeValue(it) }
+            )
+            if ((isBroker && title.isBlank()) || price.toDoubleOrNull() == null || hasInvalidAttribute) {
+                showValidation = true
+                return@Button
+            }
             val payload = com.google.gson.JsonObject().apply {
                 if (existing != null) addProperty("id", existing.id)
-                addProperty("title", title); addProperty("description", description)
+                addProperty("title", title)
+                addProperty("description", existing?.description.orEmpty())
                 add("attribute_values", com.google.gson.JsonObject().apply {
-                    attributeTemplates.forEach { template ->
-                        val value = attributeValues[template.key].orEmpty()
+                    sanitizedTemplates.forEach { template ->
+                        if (template.key == "security_deposit" && hideSecurityDeposit) {
+                            addProperty("security_deposit", "0")
+                            return@forEach
+                        }
+                        val value = currentAttributeValue(template)
                         if (value.isBlank()) return@forEach
                         when (template.inputType) {
                             "boolean" -> addProperty(template.key, value == "true")
                             "number" -> value.toDoubleOrNull()?.let { addProperty(template.key, it) } ?: addProperty(template.key, value)
-                            "multiselect" -> add(template.key, com.google.gson.JsonArray().apply { value.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach(::add) })
+                            "multiselect" -> add(template.key, com.google.gson.JsonArray().apply { parseCsvAttributeValues(value).forEach(::add) })
                             else -> addProperty(template.key, value)
                         }
                     }
+                    if (hideSecurityDeposit && !has("security_deposit")) {
+                        addProperty("security_deposit", "0")
+                    }
                 })
-                addProperty("price_amount", price.toDoubleOrNull() ?: -1.0); addProperty("duration_minutes", duration.toIntOrNull() ?: 0)
-                addProperty("is_active", if (forceActive) true else active); addProperty("display_order", existing?.displayOrder ?: 0)
+                addProperty("price_amount", price.toDoubleOrNull() ?: -1.0)
+                addProperty("duration_minutes", defaultWorkItemDurationMinutes(existing?.durationMinutes))
+                addProperty("is_active", true)
+                addProperty("display_order", existing?.displayOrder ?: 0)
             }
             onSave(payload)
         }, enabled = !saving, modifier = Modifier.fillMaxWidth().height(50.dp), colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
     ) { Text(if (saving) "Saving work item" else if (existing == null) "Save work item" else "Save changes") }
+}
+
+@Composable
+private fun WorkItemFieldSection(
+    invalid: Boolean,
+    errorMessage: String = "Complete this required field.",
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (invalid) Modifier
+                    .border(2.dp, Color(0xFFB3261E), RoundedCornerShape(12.dp))
+                    .background(Color(0xFFFFF2F1), RoundedCornerShape(12.dp))
+                    .padding(10.dp)
+                else Modifier
+            ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        content = content
+    )
+    if (invalid) {
+        Text(errorMessage, color = Color(0xFFB3261E), fontSize = 11.sp)
+    }
 }
 
 @Composable
@@ -2601,6 +3298,7 @@ private fun ProviderPackageEditor(
     attributeTemplates: List<com.estatenestora.app.data.model.ServiceAttributeTemplate>,
     saving: Boolean,
     feedback: String?,
+    serviceTypeSlug: String = "",
     onCreateOffering: suspend (com.google.gson.JsonObject) -> AndroidBridgeResponse?,
     onSave: (com.google.gson.JsonObject) -> Unit
 ) {
@@ -2744,6 +3442,7 @@ private fun ProviderPackageEditor(
                     saving = creatingWorkItem,
                     feedback = createWorkItemError,
                     forceActive = true,
+                    serviceTypeSlug = serviceTypeSlug,
                     onSave = { payload ->
                         editorScope.launch {
                             val previousIds = offerings.mapTo(mutableSetOf()) { it.id }

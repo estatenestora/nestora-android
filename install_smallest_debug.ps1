@@ -2,6 +2,18 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME) -or -not (Test-Path "$env:JAVA_HOME\bin\java.exe")) {
+    $candidateJdks = @('C:\Program Files\Java\jdk-17', 'C:\Program Files\Android\Android Studio\jbr')
+    foreach ($jdk in $candidateJdks) {
+        if (Test-Path "$jdk\bin\java.exe") {
+            $env:JAVA_HOME = $jdk
+            if ($env:PATH -notlike "*$jdk\bin*") {
+                $env:PATH = "$jdk\bin;" + $env:PATH
+            }
+            break
+        }
+    }
+}
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $adbPath = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
 if (-not (Test-Path -LiteralPath $adbPath)) {
@@ -40,7 +52,7 @@ try {
     foreach ($abi in $devicesByAbi.Keys) {
         Write-Host "Building the smallest debug APK for $abi..."
         Remove-Item -Recurse -Force "$projectRoot\build\reports" -ErrorAction SilentlyContinue
-        & .\gradlew.bat :app:assembleDebug --offline --no-build-cache "-Pandroid.injected.build.abi=$abi"
+        & .\gradlew.bat :app:assembleDebug --no-build-cache "-Pandroid.injected.build.abi=$abi"
         if ($LASTEXITCODE -ne 0) { throw "Debug build failed for ABI $abi." }
 
         $apkPath = Join-Path $projectRoot 'app\build\outputs\apk\debug\app-debug.apk'
