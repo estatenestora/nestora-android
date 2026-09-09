@@ -82,6 +82,8 @@ fun isValidImageUrl(url: String): Boolean {
 @Composable
 fun ProfileScreen(
     profile: UserProfile,
+    initialEditing: Boolean = false,
+    onEditingChange: ((Boolean) -> Unit)? = null,
     onLogout: () -> Unit,
     onBack: () -> Unit,
     onUpdateProfile: suspend (UserProfile) -> UserProfile?,
@@ -100,7 +102,12 @@ fun ProfileScreen(
     val context = LocalContext.current
     
     // States for Edit Profile Form
-    var isEditing by remember { mutableStateOf(false) }
+    var isEditing by remember(initialEditing) { mutableStateOf(initialEditing) }
+    LaunchedEffect(initialEditing) {
+        if (initialEditing != isEditing) {
+            isEditing = initialEditing
+        }
+    }
     var editName by remember(profile) { mutableStateOf(profile.name) }
     var editPhone by remember(profile) { mutableStateOf(profile.phone) }
     var editEmail by remember(profile) { mutableStateOf(profile.email) }
@@ -236,10 +243,8 @@ fun ProfileScreen(
             },
             onBack = { showLocationPicker = false }
         )
-        return
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
+    } else {
+        Box(modifier = Modifier.fillMaxSize()) {
         // Styled Snackbar — shown for all validation errors and save success/failure
         SnackbarHost(
             hostState = snackbarHostState,
@@ -275,6 +280,7 @@ fun ProfileScreen(
                                 runValidationAndSave {
                                     showBackConfirmationDialog = false
                                     isEditing = false
+                                    onEditingChange?.invoke(false)
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
@@ -287,6 +293,7 @@ fun ProfileScreen(
                             onClick = {
                                 showBackConfirmationDialog = false
                                 isEditing = false
+                                onEditingChange?.invoke(false)
                                 // reset form state
                                 editName = profile.name
                                 editPhone = profile.phone
@@ -331,6 +338,7 @@ fun ProfileScreen(
                                     showBackConfirmationDialog = true
                                 } else {
                                     isEditing = false
+                                    onEditingChange?.invoke(false)
                                 }
                             }
                         ) {
@@ -355,6 +363,7 @@ fun ProfileScreen(
                             onClick = {
                                 runValidationAndSave {
                                     isEditing = false
+                                    onEditingChange?.invoke(false)
                                 }
                             },
                             colors = ButtonDefaults.textButtonColors(
@@ -612,6 +621,7 @@ fun ProfileScreen(
                                         .clickable {
                                             displayPicUri = null
                                             isEditing = true
+                                            onEditingChange?.invoke(true)
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -892,6 +902,7 @@ fun ProfileScreen(
                                     menuExpanded = false
                                     displayPicUri = null
                                     isEditing = true
+                                    onEditingChange?.invoke(true)
                                 }
                                 .padding(horizontal = 20.dp, vertical = 14.dp)
                         ) {
@@ -945,6 +956,7 @@ fun ProfileScreen(
             }
         }
     }
+}
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

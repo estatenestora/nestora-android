@@ -1,8 +1,10 @@
 package com.estatenestora.app.ui.screens
 
+import com.estatenestora.app.data.model.CustomerCatalogPresentation
 import com.estatenestora.app.data.model.ProviderServiceOffering
 import com.estatenestora.app.data.model.ProviderServicePackage
 import com.estatenestora.app.data.model.ListingServiceCatalog
+import com.google.gson.Gson
 import com.google.gson.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +13,45 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AdaptiveBookingSheetScopePresentationTest {
+    @Test
+    fun `legacy catalog response without presentation falls back without crashing`() {
+        val catalog = Gson().fromJson(
+            """{"listing_id":"listing-1","provider_id":"provider-1","service_type_id":"broker"}""",
+            ListingServiceCatalog::class.java
+        )
+
+        assertNull(catalog.customerPresentation)
+        assertEquals("SERVICE", catalog.customerPresentationOrDefault().mode)
+        assertTrue(catalog.customerPresentationOrDefault().showDuration)
+    }
+
+    @Test
+    fun `property checkout exposes platform fee instead of property amount or duration`() {
+        val presentation = CustomerCatalogPresentation(
+            mode = "PROPERTY",
+            showDuration = false,
+            checkoutAmountMode = "PLATFORM_FEE_ONLY",
+            platformFeeAmount = 49.0
+        )
+        val summary = CustomerServiceCartSummary(
+            kind = "ITEMS",
+            title = "2 BHK flat",
+            itemCount = 1,
+            providerAmount = 2_500_000.0,
+            durationMinutes = 60
+        )
+
+        assertEquals("Nestora platform fee · ₹49", customerCheckoutAmountLabel(presentation, summary))
+        assertFalse(customerCheckoutAmountLabel(presentation, summary).contains("2500000"))
+        assertFalse(customerCheckoutAmountLabel(presentation, summary).contains("min"))
+    }
+
+    @Test
+    fun `property policy terms use dates rather than hourly labels`() {
+        assertEquals("Occupancy dates", customerFlexibleTermLabel("OCCUPANCY_INTERVAL"))
+        assertEquals("2026-09-10T18:30:00Z", occupancyDateInstant("2026-09-11"))
+    }
+
     @Test
     fun `customer scope details use a readable description and typed attributes`() {
         val attributes = JsonObject().apply {

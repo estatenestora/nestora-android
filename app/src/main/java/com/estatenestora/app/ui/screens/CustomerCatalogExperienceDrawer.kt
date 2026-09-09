@@ -65,6 +65,8 @@ internal fun CustomerCatalogExperienceDrawer(
     quantity: Int = 0,
     packageSelected: Boolean = false,
     existingQuantities: Map<String, Int> = emptyMap(),
+    showDuration: Boolean = true,
+    propertyMode: Boolean = false,
     onResolveMedia: suspend (String) -> String?,
     onDismiss: () -> Unit,
     onOfferingQuantity: (Int) -> Unit = {},
@@ -83,7 +85,7 @@ internal fun CustomerCatalogExperienceDrawer(
         else pack?.packagePriceAmount ?: offering?.priceAmount ?: 0.0
 
     FilterOverlaySheet(
-        title = if (pack != null) "Package options" else "Service details",
+        title = if (propertyMode) "Property details" else if (pack != null) "Package options" else "Service details",
         onDismissRequest = onDismiss
     ) {
         Column(Modifier.fillMaxSize().background(ExperienceCanvas)) {
@@ -96,10 +98,11 @@ internal fun CustomerCatalogExperienceDrawer(
                         custom = custom,
                         chosen = chosen,
                         existingQuantities = existingQuantities,
+                        propertyMode = propertyMode,
                         onCustomChanged = { custom = it },
                         onResolveMedia = onResolveMedia
                     )
-                    offering != null -> OfferingExperience(listing, offering, onResolveMedia)
+                    offering != null -> OfferingExperience(listing, offering, showDuration, propertyMode, onResolveMedia)
                 }
                 Spacer(Modifier.height(14.dp))
             }
@@ -112,7 +115,7 @@ internal fun CustomerCatalogExperienceDrawer(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            if (custom) "Selected total" else if (pack != null) "Package total" else "Service price",
+                            if (custom) "Selected total" else if (propertyMode) "Listed property price" else if (pack != null) "Package total" else "Service price",
                             color = ExperienceMuted,
                             fontSize = 12.sp
                         )
@@ -134,11 +137,11 @@ internal fun CustomerCatalogExperienceDrawer(
                     ) {
                         Text(
                             when {
-                                custom -> "Add ${chosen.size} service${if (chosen.size == 1) "" else "s"}"
+                                custom -> "Add ${chosen.size} ${if (propertyMode) "option" else "service"}${if (chosen.size == 1) "" else "s"}"
                                 pack != null && packageSelected -> "Already in cart"
-                                pack != null -> "Add package"
+                                pack != null -> if (propertyMode) "Add collection" else "Add package"
                                 quantity > 0 -> "Remove"
-                                else -> "Add to cart"
+                                else -> if (propertyMode) "Add to enquiry" else "Add to cart"
                             },
                             fontWeight = FontWeight.Bold
                         )
@@ -157,6 +160,7 @@ private fun PackageExperience(
     custom: Boolean,
     chosen: MutableMap<String, Int>,
     existingQuantities: Map<String, Int>,
+    propertyMode: Boolean,
     onCustomChanged: (Boolean) -> Unit,
     onResolveMedia: suspend (String) -> String?
 ) {
@@ -169,15 +173,15 @@ private fun PackageExperience(
         media = pack.mediaGallery.orEmpty().ifEmpty { listOfNotNull(pack.media) },
         onResolveMedia = onResolveMedia
     )
-    ExperienceSection("Choose your package") {
+    ExperienceSection(if (propertyMode) "Choose property options" else "Choose your package") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            PackageModeCard(Modifier.weight(1f), "Complete package", "Everything included", !custom) { onCustomChanged(false) }
-            PackageModeCard(Modifier.weight(1f), "Pick services", "Create your combination", custom) { onCustomChanged(true) }
+            PackageModeCard(Modifier.weight(1f), if (propertyMode) "Full collection" else "Complete package", "Everything included", !custom) { onCustomChanged(false) }
+            PackageModeCard(Modifier.weight(1f), if (propertyMode) "Pick properties" else "Pick services", "Create your combination", custom) { onCustomChanged(true) }
         }
     }
-    ExperienceSection(if (custom) "Select services" else "Included in this package") {
+    ExperienceSection(if (custom) if (propertyMode) "Select properties" else "Select services" else if (propertyMode) "Included properties" else "Included in this package") {
         if (custom) {
-            Text("Choose any combination. Each service can be selected once.", color = ExperienceMuted, style = MaterialTheme.typography.bodySmall)
+            Text(if (propertyMode) "Choose any combination. Each property can be selected once." else "Choose any combination. Each service can be selected once.", color = ExperienceMuted, style = MaterialTheme.typography.bodySmall)
             available.forEach { item ->
                 val alreadyInCart = existingQuantities[item.id] == 1
                 val selected = chosen[item.id] == 1
@@ -208,34 +212,36 @@ private fun PackageExperience(
 private fun OfferingExperience(
     listing: ServiceListing,
     offering: ProviderServiceOffering,
+    showDuration: Boolean,
+    propertyMode: Boolean,
     onResolveMedia: suspend (String) -> String?
 ) {
     ExperienceHero(
         title = offering.title,
         subtitle = offering.description,
         price = offering.priceAmount,
-        durationMinutes = offering.durationMinutes,
+        durationMinutes = offering.durationMinutes.takeIf { showDuration },
         rating = listing.rating,
         providerName = listing.providerName,
         media = offering.mediaGallery.orEmpty().ifEmpty { listOfNotNull(offering.media) },
         onResolveMedia = onResolveMedia
     )
-    ExperienceSection("Designed for a clear booking") {
+    ExperienceSection(if (propertyMode) "Property enquiry details" else "Designed for a clear booking") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            ExperienceBenefit(Modifier.weight(1f), "01", "Upfront", "Clear service price")
-            ExperienceBenefit(Modifier.weight(1f), "02", "Single unit", "No quantity confusion")
-            ExperienceBenefit(Modifier.weight(1f), "03", "Protected", "Validated at checkout")
+            ExperienceBenefit(Modifier.weight(1f), "01", if (propertyMode) "Listed" else "Upfront", if (propertyMode) "Provider's property price" else "Clear service price")
+            ExperienceBenefit(Modifier.weight(1f), "02", if (propertyMode) "One option" else "Single unit", "No quantity confusion")
+            ExperienceBenefit(Modifier.weight(1f), "03", "Protected", if (propertyMode) "Validated enquiry" else "Validated at checkout")
         }
     }
     if (offering.description.isNotBlank()) {
-        ExperienceSection("About this service") { Text(offering.description, color = ExperienceInk, lineHeight = 23.sp) }
+        ExperienceSection(if (propertyMode) "About this property" else "About this service") { Text(offering.description, color = ExperienceInk, lineHeight = 23.sp) }
     }
     val attributes = offering.attributeValues?.entrySet().orEmpty().mapNotNull { entry ->
         if (entry.key in setOf("photo_url", "image_url", "media_url") || entry.value.isJsonNull) null
         else experienceAttributeValue(entry.value).takeIf(String::isNotBlank)?.let { experienceAttributeLabel(entry.key) to it }
     }
     if (attributes.isNotEmpty()) {
-        ExperienceSection("Service specifications") {
+        ExperienceSection(if (propertyMode) "Property specifications" else "Service specifications") {
             attributes.forEachIndexed { index, (label, value) ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text(label, Modifier.weight(1f), color = ExperienceMuted)

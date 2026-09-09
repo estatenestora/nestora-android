@@ -591,10 +591,21 @@ data class ListingServiceCatalog(
     @SerializedName("listing_id") val listingId: String,
     @SerializedName("provider_id") val providerId: String,
     @SerializedName("service_type_id") val serviceTypeId: String,
+    // Older deployed bridge responses omit this newly added object. Gson then
+    // supplies null, so callers must use the normal-service fallback.
+    @SerializedName("customer_presentation") val customerPresentation: CustomerCatalogPresentation? = null,
     @SerializedName("offerings") val offerings: List<ProviderServiceOffering> = emptyList(),
     @SerializedName("packages") val packages: List<ProviderServicePackage> = emptyList(),
     @SerializedName("listing_media") val listingMedia: MediaAsset? = null,
     @SerializedName("listing_gallery") val listingGallery: List<MediaAsset>? = null
+)
+
+/** Backend-owned display capabilities for a service category. */
+data class CustomerCatalogPresentation(
+    @SerializedName("mode") val mode: String = "SERVICE",
+    @SerializedName("show_duration") val showDuration: Boolean = true,
+    @SerializedName("checkout_amount_mode") val checkoutAmountMode: String = "PROVIDER_ESTIMATE",
+    @SerializedName("platform_fee_amount") val platformFeeAmount: Double = 0.0
 )
 
 data class ProviderServiceOffering(

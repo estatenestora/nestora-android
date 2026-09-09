@@ -349,9 +349,13 @@ class MainActivity : ComponentActivity() {
                 var bubbleDragY by remember { mutableStateOf(0f) }
                 var isDraggingBubble by remember { mutableStateOf(false) }
                 var totalDragDistanceThisSession by remember { mutableStateOf(0f) }
+                var profileInitialEditing by remember { mutableStateOf(false) }
 
                 LaunchedEffect(selectedTab) {
                     isScrolled = false
+                    if (selectedTab != 3) {
+                        profileInitialEditing = false
+                    }
                     if (selectedTab == 0) {
                         dismissedBookingIds = emptySet()
                         isBubbleDismissedByUser = false
@@ -1354,7 +1358,15 @@ class MainActivity : ComponentActivity() {
                                 if (nestoraMoneyReturnScreen == "main") selectedTab = 3
                                 nestoraMoneyReturnScreen = "main"
                             },
-                            onAddBalanceClick = { activeScreen = "add_balance" },
+                            onAddBalanceClick = {
+                                if (profile?.upiId.isNullOrBlank()) {
+                                    profileInitialEditing = true
+                                    activeScreen = "main"
+                                    selectedTab = 3
+                                } else {
+                                    activeScreen = "add_balance"
+                                }
+                            },
                             getWalletBalance = { repository.getWalletBalance() }
                         )
                     }
@@ -1366,6 +1378,7 @@ class MainActivity : ComponentActivity() {
                             onCreateTopUp = { amount -> repository.createWalletTopUp(amount) },
                             onReportTopUp = { topUpId, transactionId -> repository.reportWalletTopUp(topUpId, transactionId)?.reply },
                             onSetUpiId = {
+                                profileInitialEditing = true
                                 activeScreen = "main"
                                 selectedTab = 3
                             }
@@ -1601,7 +1614,10 @@ class MainActivity : ComponentActivity() {
                                         if (p != null && !guestMode) {
                                             ProfileScreen(
                                                 profile = p,
+                                                initialEditing = profileInitialEditing,
+                                                onEditingChange = { profileInitialEditing = it },
                                                 onLogout = {
+                                                     profileInitialEditing = false
                                                      prefs.edit().putBoolean("guest_mode", false).apply()
                                                      updateCustomerCart(null)
                                                      guestMode = false
@@ -1609,7 +1625,10 @@ class MainActivity : ComponentActivity() {
                                                      bookingPolling.clear()
                                                      TdLibManager.logOut()
                                                  },
-                                                onBack = { selectedTab = 0 },
+                                                onBack = {
+                                                    profileInitialEditing = false
+                                                    selectedTab = 0
+                                                },
                                                 onUpdateProfile = { updated ->
                                                     repository.updateUserProfile(updated)?.also { saved -> profile = saved }
                                                 },
@@ -1691,6 +1710,7 @@ class MainActivity : ComponentActivity() {
                                         activeScreen = "main"
                                     }
                                     NestoraPrimaryDestination.Account -> {
+                                        profileInitialEditing = false
                                         selectedTab = 3
                                         activeScreen = "main"
                                     }
