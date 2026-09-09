@@ -435,8 +435,8 @@ fun HomeScreen(
                         PopularServiceItem("Maids", "Daily House Help", "maid"),
                         PopularServiceItem("Electricians", "Wiring & Repair", "electrician"),
                         PopularServiceItem("Brokers", "Verified Agents", "broker"),
-                        PopularServiceItem("Flat Owners", "Direct Rentals", "flat owner"),
-                        PopularServiceItem("Laundry Service", "Wash & Fold", "laundry service")
+                        PopularServiceItem("Flat Owners", "Direct Rentals", "flat_owner"),
+                        PopularServiceItem("Laundry Service", "Wash & Fold", "laundry_service")
                     )
                 }
 
