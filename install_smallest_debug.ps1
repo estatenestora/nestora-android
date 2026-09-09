@@ -50,9 +50,17 @@ foreach ($serial in $serials) {
 Push-Location $projectRoot
 try {
     foreach ($abi in $devicesByAbi.Keys) {
+        if (Test-Path -LiteralPath "$projectRoot\build\reports") {
+            try {
+                Remove-Item -Recurse -Force "$projectRoot\build\reports" -ErrorAction Stop
+            } catch {
+                Rename-Item "$projectRoot\build\reports" "$projectRoot\build\reports_$(Get-Random)" -ErrorAction SilentlyContinue
+            }
+        }
         Write-Host "Building the smallest debug APK for $abi..."
-        Remove-Item -Recurse -Force "$projectRoot\build\reports" -ErrorAction SilentlyContinue
-        & .\gradlew.bat :app:assembleDebug --no-build-cache "-Pandroid.injected.build.abi=$abi"
+        # Reuse Gradle outputs between installs; ABI filtering still ensures
+        # that the generated APK contains only the connected device's native libraries.
+        & .\gradlew.bat :app:assembleDebug --build-cache "-Pandroid.injected.build.abi=$abi"
         if ($LASTEXITCODE -ne 0) { throw "Debug build failed for ABI $abi." }
 
         $apkPath = Join-Path $projectRoot 'app\build\outputs\apk\debug\app-debug.apk'

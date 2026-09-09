@@ -162,8 +162,7 @@ fun RegisterServiceScreen(
             },
             onBack = { showLocationPicker = false }
         )
-        return
-    }
+    } else {
 
     // ── Theme colours ────────────────────────────────────────────────────────
     val mintColor = NestoraMint
@@ -274,8 +273,7 @@ fun RegisterServiceScreen(
                     }
                 }
             }
-            return@Box
-        }
+        } else {
 
         // ── Main form ────────────────────────────────────────────────────────
         LazyColumn(
@@ -729,24 +727,31 @@ fun RegisterServiceScreen(
                                     }
                                     if (extractedCity.isBlank()) extractedCity = parts.firstOrNull() ?: ""
 
-                                    val response = onSubmit(
-                                        cat.id,
-                                        st.slug,
-                                        0.0,
-                                        address.trim(),
-                                        extractedCity,
-                                        selectedLat,
-                                        selectedLon,
-                                        "",
-                                        "",
-                                        emptyMap()
-                                    )
-                                    isSubmitting = false
-                                    if (response != null && response.ok) {
-                                        isSuccess = true
-                                    } else {
-                                        errorMessage = response?.reply
-                                            ?: "Nestora did not receive all listing details. Please tap Register again; no listing was created."
+                                    try {
+                                        val response = onSubmit(
+                                            cat.id,
+                                            st.slug,
+                                            0.0,
+                                            address.trim(),
+                                            extractedCity,
+                                            selectedLat,
+                                            selectedLon,
+                                            "",
+                                            "",
+                                            emptyMap()
+                                        )
+                                        if (response != null && response.ok) {
+                                            isSuccess = true
+                                        } else {
+                                            errorMessage = response?.reply
+                                                ?: "Nestora did not receive all listing details. Please tap Register again; no listing was created."
+                                        }
+                                    } catch (e: kotlinx.coroutines.CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        errorMessage = "Something went wrong while registering your service. Please try again."
+                                    } finally {
+                                        isSubmitting = false
                                     }
                                 }
                             }
@@ -818,6 +823,8 @@ fun RegisterServiceScreen(
                 },
                 onDismissRequest = { showServiceTypeSheet = false }
             )
+        }
+        }
         }
     }
 }

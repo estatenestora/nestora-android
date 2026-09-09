@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -80,6 +81,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -90,6 +93,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.estatenestora.app.data.model.AndroidBridgeResponse
+import com.estatenestora.app.data.model.CustomerCatalogPresentation
 import com.estatenestora.app.data.model.ListingServiceCatalog
 import com.estatenestora.app.data.model.ProviderServiceOffering
 import com.estatenestora.app.data.model.ProviderServicePackage
@@ -361,6 +365,7 @@ internal fun CustomerServiceCatalogScreen(
             StorefrontCartBar(
                 cart = selectedCart,
                 cartOnly = cartOnly,
+                presentation = loaded?.customerPresentation,
                 onOpenCart = {
                     if (selectedCart == null) {
                         scope.launch { snackbarHostState.showSnackbar("Add at least one package or service to continue.") }
@@ -372,6 +377,7 @@ internal fun CustomerServiceCatalogScreen(
                 }
             )
         },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = Color(0xFFF6F8F7)
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -407,7 +413,7 @@ internal fun CustomerServiceCatalogScreen(
                     }
                 }
                 catalog != null && !switchConflict -> {
-                    val loaded = catalog ?: return@Box
+                    val loaded = requireNotNull(catalog)
                     if (cartOnly) {
                         Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
                             StorefrontUrbanCompanyHero(listing)
@@ -418,6 +424,7 @@ internal fun CustomerServiceCatalogScreen(
                             selectedPackageId = selectedPackageId,
                             quantities = quantities,
                             useListingPrice = useListingPrice,
+                            presentation = loaded.customerPresentationOrDefault(),
                             onRemovePackage = {
                                 selectedPackageId = null
                                 updateCart(nextPackageId = null)
@@ -439,6 +446,7 @@ internal fun CustomerServiceCatalogScreen(
                         CustomerProviderStorefront(
                             listing = listing,
                             catalog = loaded,
+                            presentation = loaded.customerPresentationOrDefault(),
                             selectedPackageId = selectedPackageId,
                             quantities = quantities,
                             useListingPrice = useListingPrice,
@@ -489,6 +497,7 @@ internal fun CustomerServiceCatalogScreen(
 private fun CustomerProviderStorefront(
     listing: ServiceListing,
     catalog: ListingServiceCatalog,
+    presentation: CustomerCatalogPresentation,
     selectedPackageId: String?,
     quantities: Map<String, Int>,
     useListingPrice: Boolean,
@@ -508,26 +517,28 @@ private fun CustomerProviderStorefront(
     var query by remember(catalog.listingId) { mutableStateOf("") }
     var mode by remember(catalog.listingId) { mutableStateOf("ALL") }
     var affordableOnly by remember(catalog.listingId) { mutableStateOf(false) }
+    var isSearchExpanded by remember(catalog.listingId) { mutableStateOf(false) }
     var showItemsNavigator by remember(catalog.listingId) { mutableStateOf(false) }
     var detailOffering by remember(catalog.listingId) { mutableStateOf<ProviderServiceOffering?>(null) }
     var detailPackage by remember(catalog.listingId) { mutableStateOf<ProviderServicePackage?>(null) }
-    val result = remember(catalog, listing, query, mode, affordableOnly) {
+    val isProperty = presentation.mode == "PROPERTY"
+    val result = remember(catalog, listing, query, mode, affordableOnly, isProperty) {
         customerCatalogSearch(
             catalog = catalog,
             query = query,
             mode = mode,
-            maximumPrice = if (affordableOnly) 500.0 else null,
+            maximumPrice = if (affordableOnly && !isProperty) 500.0 else null,
             providerContext = "${listing.title} ${listing.serviceType} ${listing.providerName} ${listing.location}"
         )
     }
-    val blocks = remember(result) {
+    val blocks = remember(result, isProperty) {
         buildList<StorefrontBlock> {
             if (result.packages.isNotEmpty()) {
-                add(StorefrontBlock.Section("section-packages", "Packages", result.packages.size, "Complete combinations selected by the provider"))
+                add(StorefrontBlock.Section("section-packages", if (isProperty) "Property collections" else "Packages", result.packages.size, if (isProperty) "Property options selected by the provider" else "Complete combinations selected by the provider"))
                 result.packages.forEach { add(StorefrontBlock.Package("package-${it.id}", it)) }
             }
             result.offeringGroups.forEach { (group, offers) ->
-                add(StorefrontBlock.Section("section-$group", group, offers.size, "Choose only the work you need"))
+                add(StorefrontBlock.Section("section-$group", group, offers.size, if (isProperty) "Choose the property you want to enquire about" else "Choose only the work you need"))
                 offers.forEach { add(StorefrontBlock.Offering("offering-${it.id}", it)) }
             }
             if (query.isBlank() && mode != "PACKAGES" && !affordableOnly) add(StorefrontBlock.CustomService)
@@ -547,7 +558,7 @@ private fun CustomerProviderStorefront(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
-        val isScrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 180 } }
+        val isScrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             item(key = "provider-hero-info") {
@@ -562,22 +573,23 @@ private fun CustomerProviderStorefront(
                     packages = result.packages,
                     offeringGroups = result.offeringGroups,
                     fallbackPhotoUrl = listing.photoUrl,
-                    onResolveMedia = onResolveMedia
+                    onResolveMedia = onResolveMedia,
+                    heading = if (isProperty) "Explore properties" else "Explore services",
+                    propertyMode = isProperty
                 ) { sectionKey ->
                     val index = sectionDestinations.firstOrNull { it.first.key == sectionKey }?.second
                     if (index != null) scope.launch { listState.animateScrollToItem(index) }
                 }
             }
-            stickyHeader(key = "catalog-search") {
+            item(key = "catalog-filters") {
                 StorefrontSearchPanel(
-                    query = query,
-                    onQueryChange = { query = it },
                     mode = mode,
                     onModeChange = { mode = it },
                     affordableOnly = affordableOnly,
                     onAffordableChange = { affordableOnly = it },
-                    currentSection = currentSection,
-                    onSearchDone = { focusManager.clearFocus() }
+                    showPriceFilter = !isProperty,
+                    propertyMode = isProperty,
+                    currentSection = currentSection
                 )
             }
             if (blocks.isEmpty()) {
@@ -588,8 +600,8 @@ private fun CustomerProviderStorefront(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF8A9891), modifier = Modifier.size(34.dp))
-                        Text("No matching services", fontWeight = FontWeight.ExtraBold)
-                        Text("Try another service name or clear a filter.", color = Color(0xFF60756B), textAlign = TextAlign.Center)
+                        Text(if (isProperty) "No matching properties" else "No matching services", fontWeight = FontWeight.ExtraBold)
+                        Text(if (isProperty) "Try another property type or clear a filter." else "Try another service name or clear a filter.", color = Color(0xFF60756B), textAlign = TextAlign.Center)
                         TextButton(onClick = { query = ""; mode = "ALL"; affordableOnly = false }) { Text("Clear filters", color = NestoraMint) }
                     }
                 }
@@ -604,6 +616,8 @@ private fun CustomerProviderStorefront(
                             photoUrl = block.value.items.firstNotNullOfOrNull(::offeringPhotoUrl) ?: listing.photoUrl,
                             media = block.value.media,
                             onResolveMedia = onResolveMedia,
+                            showDuration = presentation.showDuration,
+                            propertyMode = isProperty,
                             onToggle = { onSelectPackage(block.value.id) },
                             onDetails = { detailPackage = block.value }
                         )
@@ -615,6 +629,7 @@ private fun CustomerProviderStorefront(
                             photoUrl = offeringPhotoUrl(block.value) ?: listing.photoUrl,
                             media = block.value.media,
                             onResolveMedia = onResolveMedia,
+                            showDuration = presentation.showDuration,
                             quantity = quantities[block.value.id] ?: 0,
                             onToggle = { onChangeQuantity(block.value.id, if ((quantities[block.value.id] ?: 0) > 0) 0 else 1) },
                             onDetails = { detailOffering = block.value }
@@ -622,7 +637,7 @@ private fun CustomerProviderStorefront(
                         StorefrontItemDivider()
                     }
                     StorefrontBlock.CustomService -> item(key = block.key) {
-                        StorefrontCustomService(listing = listing, selected = useListingPrice, onSelect = onSelectCustom)
+                        StorefrontCustomService(listing = listing, selected = useListingPrice, propertyMode = isProperty, onSelect = onSelectCustom)
                     }
                 }
             }
@@ -639,20 +654,26 @@ private fun CustomerProviderStorefront(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 14.dp)) {
                     Icon(Icons.Default.Menu, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("ITEMS", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    if (isProperty) Text("OPTIONS", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    else Text("ITEMS", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
                 }
             }
         }
 
         StorefrontUrbanCompanyTopBar(
             title = listing.title,
-            subtitle = listing.location,
+            subtitle = "by ${listing.providerName}",
             isScrolled = isScrolled,
+            isSearchExpanded = isSearchExpanded,
+            searchQuery = query,
             cartItemCount = currentCart?.itemCount ?: 0,
             onBack = onBack,
-            onSearch = {
+            onSearch = { isSearchExpanded = true },
+            onSearchQueryChange = { query = it.take(80) },
+            onCloseSearch = {
                 focusManager.clearFocus()
-                scope.launch { listState.animateScrollToItem(2) }
+                query = ""
+                isSearchExpanded = false
             },
             onShare = {
                 val share = Intent(Intent.ACTION_SEND).apply {
@@ -669,6 +690,8 @@ private fun CustomerProviderStorefront(
         CustomerCatalogExperienceDrawer(
             listing = listing, catalog = catalog, offering = offer,
             quantity = quantities[offer.id] ?: 0, onResolveMedia = onResolveMedia,
+            showDuration = presentation.showDuration,
+            propertyMode = isProperty,
             onDismiss = { detailOffering = null },
             onOfferingQuantity = { onChangeQuantity(offer.id, it) }
         )
@@ -678,6 +701,8 @@ private fun CustomerProviderStorefront(
             listing = listing, catalog = catalog, pack = pack,
             existingQuantities = quantities,
             packageSelected = selectedPackageId == pack.id, onResolveMedia = onResolveMedia,
+            showDuration = presentation.showDuration,
+            propertyMode = isProperty,
             onDismiss = { detailPackage = null },
             onCompletePackage = { onSelectPackage(pack.id) },
             onPackageItems = { onAddPackageItems(pack.id, it) }
@@ -720,6 +745,10 @@ private fun StorefrontUrbanCompanyHero(
                 )
             }
             Box(
+                modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter).height(110.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.48f), Color.Transparent)))
+            )
+            Box(
                 modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(110.dp)
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.62f))))
             )
@@ -748,22 +777,6 @@ private fun StorefrontUrbanCompanyHero(
                         fontWeight = FontWeight.Bold
                     )
                 }
-            }
-        }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(listing.title, color = Color(0xFF111A16), fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
-            Text("by ${listing.providerName}", color = Color(0xFF53615A), fontSize = 13.sp)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFF176B50), modifier = Modifier.size(16.dp))
-                Text(
-                    if (listing.rating > 0f) String.format(Locale.US, "%.1f provider rating", listing.rating) else "New provider",
-                    color = Color(0xFF19221E),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
-                )
-            }
-            if (listing.location.isNotBlank()) {
-                Text(listing.location, color = Color(0xFF66736D), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         HorizontalDivider(thickness = 8.dp, color = Color(0xFFF3F5F4))
@@ -795,25 +808,27 @@ private fun StorefrontCategoryGrid(
     offeringGroups: Map<String, List<ProviderServiceOffering>>,
     fallbackPhotoUrl: String?,
     onResolveMedia: suspend (String) -> String?,
+    heading: String,
+    propertyMode: Boolean,
     onCategoryClick: (String) -> Unit
 ) {
-    val shortcuts = remember(packages, offeringGroups) {
+    val shortcuts = remember(packages, offeringGroups, propertyMode) {
         buildList {
             if (packages.isNotEmpty()) {
                 val packageMedia = packages.firstNotNullOfOrNull { pack ->
                     pack.mediaGallery.orEmpty().firstOrNull() ?: pack.media ?: pack.items.firstNotNullOfOrNull { it.mediaGallery.orEmpty().firstOrNull() ?: it.media }
                 }
-                add(StorefrontShortcut("section-packages", "Packages", packageMedia))
+                add(StorefrontShortcut("section-packages", if (propertyMode) "Collections" else "Packages", packageMedia))
             }
             offeringGroups.forEach { (group, offers) ->
                 add(StorefrontShortcut("section-$group", group, offers.firstNotNullOfOrNull { it.mediaGallery.orEmpty().firstOrNull() ?: it.media }))
             }
         }
     }
-    if (shortcuts.isEmpty()) return
-    Column(modifier = Modifier.fillMaxWidth().background(Color.White).padding(top = 16.dp)) {
+    if (shortcuts.isNotEmpty()) {
+        Column(modifier = Modifier.fillMaxWidth().background(Color.White).padding(top = 16.dp)) {
         Text(
-            "Explore services",
+            heading,
             modifier = Modifier.padding(horizontal = 18.dp),
             color = Color(0xFF111A16),
             fontSize = 18.sp,
@@ -848,7 +863,8 @@ private fun StorefrontCategoryGrid(
                 }
             }
         }
-        HorizontalDivider(modifier = Modifier.padding(top = 18.dp), thickness = 8.dp, color = Color(0xFFF3F5F4))
+            HorizontalDivider(modifier = Modifier.padding(top = 18.dp), thickness = 8.dp, color = Color(0xFFF3F5F4))
+        }
     }
 }
 
@@ -891,14 +907,23 @@ private fun StorefrontUrbanCompanyTopBar(
     title: String,
     subtitle: String,
     isScrolled: Boolean,
+    isSearchExpanded: Boolean,
+    searchQuery: String,
     cartItemCount: Int,
     onBack: () -> Unit,
     onSearch: () -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onCloseSearch: () -> Unit,
     onShare: () -> Unit,
     onCart: () -> Unit
 ) {
-    val backgroundColor by animateColorAsState(if (isScrolled) Color.White else Color.Transparent, label = "bg")
-    val dividerColor by animateColorAsState(if (isScrolled) Color(0xFFE3E8E5) else Color.Transparent, label = "divider")
+    val searchFocusRequester = remember { FocusRequester() }
+    val backgroundColor by animateColorAsState(if (isScrolled || isSearchExpanded) Color.White else Color.Transparent, label = "bg")
+    val dividerColor by animateColorAsState(if (isScrolled || isSearchExpanded) Color(0xFFE3E8E5) else Color.Transparent, label = "divider")
+
+    LaunchedEffect(isSearchExpanded) {
+        if (isSearchExpanded) searchFocusRequester.requestFocus()
+    }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -913,31 +938,68 @@ private fun StorefrontUrbanCompanyTopBar(
                 StorefrontHeaderAction(onClick = onBack, contentDescription = "Back") {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(20.dp))
                 }
-                if (isScrolled) {
+                if (isSearchExpanded) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .padding(start = 8.dp)
+                            .focusRequester(searchFocusRequester),
+                        placeholder = { Text("Search services", fontSize = 13.sp) },
+                        trailingIcon = {
+                            IconButton(onClick = onCloseSearch) {
+                                Icon(Icons.Default.Close, contentDescription = "Close search")
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(22.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color(0xFFF5F7F6),
+                            unfocusedContainerColor = Color(0xFFF5F7F6),
+                            focusedIndicatorColor = NestoraMint,
+                            unfocusedIndicatorColor = Color(0xFFDCE3E0)
+                        )
+                    )
+                } else {
                     Column(
                         modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                         verticalArrangement = Arrangement.Center
                     ) {
-                        Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = Color(0xFF101814), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            title,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 16.sp,
+                            color = if (isScrolled) Color(0xFF101814) else Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         subtitle.takeIf(String::isNotBlank)?.let {
-                            Text(it, color = Color(0xFF66736D), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                it,
+                                color = if (isScrolled) Color(0xFF66736D) else Color.White.copy(alpha = 0.92f),
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
-                } else {
-                    Spacer(modifier = Modifier.weight(1f))
                 }
-                StorefrontHeaderAction(onClick = onSearch, contentDescription = "Search") {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(20.dp))
-                }
-                Spacer(Modifier.width(7.dp))
-                StorefrontHeaderAction(onClick = onShare, contentDescription = "Share") {
-                    Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(19.dp))
-                }
-                if (cartItemCount > 0) {
+                if (!isSearchExpanded) {
+                    StorefrontHeaderAction(onClick = onSearch, contentDescription = "Search") {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(20.dp))
+                    }
                     Spacer(Modifier.width(7.dp))
-                    StorefrontHeaderAction(onClick = onCart, contentDescription = "Cart") {
-                        BadgedBox(badge = { Badge { Text(cartItemCount.toString()) } }) {
-                            Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(19.dp))
+                    StorefrontHeaderAction(onClick = onShare, contentDescription = "Share") {
+                        Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(19.dp))
+                    }
+                    if (cartItemCount > 0) {
+                        Spacer(Modifier.width(7.dp))
+                        StorefrontHeaderAction(onClick = onCart, contentDescription = "Cart") {
+                            BadgedBox(badge = { Badge { Text(cartItemCount.toString()) } }) {
+                                Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(19.dp))
+                            }
                         }
                     }
                 }
@@ -968,48 +1030,30 @@ private fun StorefrontHeaderAction(
 }
 @Composable
 private fun StorefrontSearchPanel(
-    query: String,
-    onQueryChange: (String) -> Unit,
     mode: String,
     onModeChange: (String) -> Unit,
     affordableOnly: Boolean,
     onAffordableChange: (Boolean) -> Unit,
-    currentSection: StorefrontBlock.Section?,
-    onSearchDone: () -> Unit
+    showPriceFilter: Boolean,
+    propertyMode: Boolean,
+    currentSection: StorefrontBlock.Section?
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(Color.White)) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { onQueryChange(it.take(80)) },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search this provider's services") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    IconButton(onClick = { if (query.isBlank()) onSearchDone() else onQueryChange("") }) {
-                        Icon(if (query.isBlank()) Icons.Default.Search else Icons.Default.Close, contentDescription = if (query.isBlank()) "Search" else "Clear search")
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFFF5F7F6),
-                    unfocusedContainerColor = Color(0xFFF5F7F6),
-                    focusedIndicatorColor = NestoraMint,
-                    unfocusedIndicatorColor = Color(0xFFDCE3E0)
-                )
-            )
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listOf("ALL" to "All", "PACKAGES" to "Packages", "SERVICES" to "Services").forEach { (value, label) ->
+                (if (propertyMode) listOf("ALL" to "All", "PACKAGES" to "Collections", "SERVICES" to "Properties")
+                else listOf("ALL" to "All", "PACKAGES" to "Packages", "SERVICES" to "Services")).forEach { (value, label) ->
                     FilterChip(selected = mode == value, onClick = { onModeChange(value) }, label = { Text(label) })
                 }
-                FilterChip(selected = affordableOnly, onClick = { onAffordableChange(!affordableOnly) }, label = { Text("Under ₹500") })
+                if (showPriceFilter) {
+                    FilterChip(selected = affordableOnly, onClick = { onAffordableChange(!affordableOnly) }, label = { Text("Under ₹500") })
+                }
             }
         }
         HorizontalDivider(color = Color(0xFFE4E9E6))
@@ -1051,15 +1095,20 @@ private fun StorefrontItemDivider() {
 }
 
 @Composable
-private fun StorefrontCustomService(listing: ServiceListing, selected: Boolean, onSelect: () -> Unit) {
+private fun StorefrontCustomService(listing: ServiceListing, selected: Boolean, propertyMode: Boolean, onSelect: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(top = 10.dp).clickable(onClick = onSelect),
         color = if (selected) Color(0xFFE8F6F1) else Color(0xFFF8FAF9)
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Need something different?", fontWeight = FontWeight.ExtraBold)
-                Text("Describe custom work from ₹${listing.price.toInt()}. The provider confirms the final scope.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+                Text(if (propertyMode) "Looking for another property?" else "Need something different?", fontWeight = FontWeight.ExtraBold)
+                Text(
+                    if (propertyMode) "Describe the property you need. Price and terms are agreed directly with the provider."
+                    else "Describe custom work from ₹${listing.price.toInt()}. The provider confirms the final scope.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF60756B)
+                )
             }
             OutlinedButton(onClick = onSelect, border = BorderStroke(1.dp, NestoraMint)) {
                 Text(if (selected) "Selected" else "Select", color = NestoraMint, fontWeight = FontWeight.Bold)
@@ -1108,6 +1157,8 @@ private fun StorefrontPackageCard(
     photoUrl: String?,
     media: MediaAsset?,
     onResolveMedia: suspend (String) -> String?,
+    showDuration: Boolean,
+    propertyMode: Boolean,
     onToggle: () -> Unit,
     onDetails: () -> Unit
 ) {
@@ -1119,7 +1170,7 @@ private fun StorefrontPackageCard(
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Surface(color = Color(0xFFE8F6F1), shape = RoundedCornerShape(5.dp)) {
-                Text("PACKAGE", modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), color = Color(0xFF146B4A), fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+                Text(if (propertyMode) "COLLECTION" else "PACKAGE", modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), color = Color(0xFF146B4A), fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
             }
             Text(pack.name, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text("₹${pack.packagePriceAmount.toInt()}", fontWeight = FontWeight.ExtraBold, color = Color(0xFF17221D))
@@ -1127,12 +1178,12 @@ private fun StorefrontPackageCard(
                 Text(pack.description, style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Text(
-                "${pack.durationMinutes} min · ${pack.items.size} services",
+                if (showDuration) "${pack.durationMinutes} min · ${pack.items.size} services" else "${pack.items.size} property option(s)",
                 style = MaterialTheme.typography.labelMedium,
                 color = Color(0xFF486158)
             )
-            Text("Includes ${providerPackageItemsLabel(pack)}", style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            if (savings > 0) {
+            Text(if (propertyMode) "Contains ${providerPackageItemsLabel(pack)}" else "Includes ${providerPackageItemsLabel(pack)}", style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            if (savings > 0 && !propertyMode) {
                 Text("Save ₹${savings.toInt()}", style = MaterialTheme.typography.labelLarge, color = Color(0xFF146B4A), fontWeight = FontWeight.Bold)
             }
         }
@@ -1153,6 +1204,8 @@ private fun StorefrontOfferingRow(
     photoUrl: String? = null,
     media: MediaAsset? = null,
     onResolveMedia: suspend (String) -> String? = { null },
+    showDuration: Boolean = true,
+    showPrice: Boolean = true,
     quantity: Int,
     onToggle: () -> Unit,
     onDetails: (() -> Unit)? = null
@@ -1167,7 +1220,13 @@ private fun StorefrontOfferingRow(
             providerOfferingCustomerDetails(offer).forEach { detail ->
                 Text(detail, style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            Text("₹${offer.priceAmount.toInt()} · ${offer.durationMinutes} min", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            if (showPrice) {
+                Text(
+                    if (showDuration) "₹${offer.priceAmount.toInt()} · ${offer.durationMinutes} min" else "₹${offer.priceAmount.toInt()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
         StorefrontAddVisual(
             photoUrl = photoUrl,
@@ -1251,6 +1310,7 @@ private fun QuantityControl(quantity: Int, onQuantityChange: (Int) -> Unit) {
 private fun CustomerCartReview(
     listing: ServiceListing,
     catalog: ListingServiceCatalog,
+    presentation: CustomerCatalogPresentation,
     selectedPackageId: String?,
     quantities: Map<String, Int>,
     useListingPrice: Boolean,
@@ -1258,14 +1318,15 @@ private fun CustomerCartReview(
     onChangeQuantity: (String, Int) -> Unit,
     onClear: () -> Unit
 ) {
+    val propertyCheckout = presentation.checkoutAmountMode == "PLATFORM_FEE_ONLY"
     Column(modifier = Modifier.fillMaxWidth().background(Color.White)) {
-        Text("Review selected services", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+        Text(if (propertyCheckout) "Review selected properties" else "Review selected services", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
         selectedPackageId?.let { id ->
             catalog.packages.firstOrNull { it.id == id }?.let { pack ->
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(pack.name, fontWeight = FontWeight.Bold)
-                        Text("Complete package · ₹${pack.packagePriceAmount.toInt()}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+                        Text(if (propertyCheckout) "Selected property collection" else "Complete package · ₹${pack.packagePriceAmount.toInt()}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
                     }
                     TextButton(onClick = onRemovePackage) { Text("Remove", color = MaterialTheme.colorScheme.error) }
                 }
@@ -1276,6 +1337,8 @@ private fun CustomerCartReview(
             catalog.offerings.firstOrNull { it.id == id }?.let { offer ->
                 StorefrontOfferingRow(
                     offer = offer,
+                    showDuration = presentation.showDuration,
+                    showPrice = !propertyCheckout,
                     quantity = quantity,
                     onToggle = { onChangeQuantity(id, 0) }
                 )
@@ -1284,8 +1347,8 @@ private fun CustomerCartReview(
         }
         if (useListingPrice) {
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Custom service request", fontWeight = FontWeight.Bold)
-                Text("From ₹${listing.price.toInt()}", fontWeight = FontWeight.Bold)
+                Text(if (propertyCheckout) "Custom property enquiry" else "Custom service request", fontWeight = FontWeight.Bold)
+                if (!propertyCheckout) Text("From ₹${listing.price.toInt()}", fontWeight = FontWeight.Bold)
             }
         }
         if (selectedPackageId == null && quantities.isEmpty() && !useListingPrice) {
@@ -1296,6 +1359,18 @@ private fun CustomerCartReview(
                 Text("Go back and add a package or individual service.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B), textAlign = TextAlign.Center)
             }
         } else {
+            if (propertyCheckout) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFF0F8F4)
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Nestora platform fee · ₹${presentation.platformFeeAmount.toInt()}", fontWeight = FontWeight.ExtraBold, color = Color(0xFF14513D))
+                        Text("Property price, rent, deposit, and brokerage are agreed directly with the provider and are not charged by Nestora.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+                    }
+                }
+            }
             TextButton(onClick = onClear, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
                 Text("Clear cart", color = MaterialTheme.colorScheme.error)
             }
@@ -1307,8 +1382,13 @@ private fun CustomerCartReview(
 private fun StorefrontCartBar(
     cart: CustomerProviderCart?,
     cartOnly: Boolean,
+    presentation: CustomerCatalogPresentation?,
     onOpenCart: () -> Unit
 ) {
+    val propertyCheckout = presentation?.checkoutAmountMode == "PLATFORM_FEE_ONLY"
+    val platformFeeLabel = presentation?.platformFeeAmount?.takeIf { it > 0.0 }
+        ?.let { "Nestora platform fee · ₹${it.toInt()}" }
+        ?: "Nestora platform fee shown at confirmation"
     Surface(color = Color.White, shadowElevation = 12.dp) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -1318,11 +1398,19 @@ private fun StorefrontCartBar(
             Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = NestoraMint)
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    if (cart == null) "Cart is empty" else "${cart.itemCount.coerceAtLeast(1)} item(s) · ₹${cart.providerAmount.toInt()}",
+                    when {
+                        cart == null -> "Cart is empty"
+                        propertyCheckout -> platformFeeLabel
+                        else -> "${cart.itemCount.coerceAtLeast(1)} item(s) · ₹${cart.providerAmount.toInt()}"
+                    },
                     fontWeight = FontWeight.ExtraBold
                 )
                 Text(
-                    if (cart == null) "Add services to continue" else "Provider amount paid after work",
+                    when {
+                        cart == null -> "Add services to continue"
+                        propertyCheckout -> "Property amount is not charged by Nestora"
+                        else -> "Provider amount paid after work"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF60756B)
                 )
@@ -1331,7 +1419,7 @@ private fun StorefrontCartBar(
                 onClick = onOpenCart,
                 enabled = cart != null,
                 colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
-            ) { Text(if (cartOnly) "Choose slot" else "View cart", fontWeight = FontWeight.Bold) }
+            ) { Text(if (cartOnly) if (propertyCheckout) "Proceed" else "Choose slot" else "View cart", fontWeight = FontWeight.Bold) }
         }
     }
 }

@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.estatenestora.app.data.model.BookingPolicy
 import com.estatenestora.app.data.model.AvailabilitySlot
+import com.estatenestora.app.data.model.CustomerCatalogPresentation
 import com.estatenestora.app.data.model.ServiceListing
 import com.estatenestora.app.data.model.ListingServiceCatalog
 import com.estatenestora.app.data.model.ProviderServiceOffering
@@ -53,6 +54,42 @@ internal data class CustomerServiceCartSummary(
     val providerAmount: Double,
     val durationMinutes: Int
 )
+
+internal fun CustomerCatalogPresentation.usesPlatformFeeOnlyCheckout(): Boolean =
+    checkoutAmountMode == "PLATFORM_FEE_ONLY"
+
+/** The bridge may be upgraded after the app, so catalog presentation is
+ * optional until the backend begins returning this capability object. */
+internal fun ListingServiceCatalog.customerPresentationOrDefault(): CustomerCatalogPresentation =
+    customerPresentation ?: CustomerCatalogPresentation()
+
+internal fun customerCheckoutAmountLabel(
+    presentation: CustomerCatalogPresentation,
+    summary: CustomerServiceCartSummary
+): String = if (presentation.usesPlatformFeeOnlyCheckout()) {
+    presentation.platformFeeAmount.takeIf { it > 0.0 }
+        ?.let { "Nestora platform fee · ₹${it.toInt()}" }
+        ?: "Nestora platform fee shown at confirmation"
+} else if (summary.kind == "LISTING") {
+    "Starting from ₹${summary.providerAmount.toInt()} · provider confirms final amount"
+} else {
+    "${summary.itemCount} item(s) · ₹${summary.providerAmount.toInt()} provider amount · ${summary.durationMinutes} min"
+}
+
+internal fun customerFlexibleTermLabel(term: String): String = when (term) {
+    "PREFERRED_TIME_WINDOW" -> "Preferred visit time"
+    "PREFERRED_DATE_RANGE" -> "Preferred visit dates"
+    "OCCUPANCY_INTERVAL" -> "Occupancy dates"
+    "SUBSCRIPTION_START" -> "Move-in date"
+    "DEADLINE" -> "Deadline"
+    else -> term.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
+}
+
+internal fun occupancyDateInstant(date: String): String =
+    java.time.LocalDate.parse(date)
+        .atStartOfDay(java.time.ZoneId.of("Asia/Kolkata"))
+        .toInstant()
+        .toString()
 
 /** Builds a provider-scoped cart. One package may be combined with individual
  * extras; custom requests remain exclusive. No provider/price data is
@@ -151,6 +188,7 @@ private fun customerReadableAttributeValue(value: com.google.gson.JsonElement): 
 internal fun CustomerServiceScopePicker(
     listing: ServiceListing,
     catalog: ListingServiceCatalog,
+    presentation: CustomerCatalogPresentation,
     defaultDurationMinutes: Int,
     selectedPackageId: String?,
     selectedOfferingQuantities: Map<String, Int>,
@@ -161,13 +199,15 @@ internal fun CustomerServiceScopePicker(
     onSelectListingPrice: () -> Unit,
     onContinue: () -> Unit
 ) {
+    val propertyCheckout = presentation.usesPlatformFeeOnlyCheckout()
     val summary = customerServiceCartSummary(
         catalog, selectedPackageId, selectedOfferingQuantities, useListingPrice,
         listing.price, defaultDurationMinutes
     )
-    Text("Choose what you need", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text(if (propertyCheckout) "Choose a property option" else "Choose what you need", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     Text(
-        "Add one complete package, individual work items, or combine a package with extra work from this provider. You pay only Nestora's booking fee now and the shown provider amount after the work.",
+        if (propertyCheckout) "Select what you want to enquire about. Nestora shows only its platform fee during this request; property price, rent, deposit, and brokerage remain between you and the provider."
+        else "Add one complete package, individual work items, or combine a package with extra work from this provider. You pay only Nestora's booking fee now and the shown provider amount after the work.",
         style = MaterialTheme.typography.bodySmall,
         color = Color(0xFF60756B)
     )
@@ -191,13 +231,13 @@ internal fun CustomerServiceScopePicker(
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(pack.name, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                            Text("₹${"%.0f".format(pack.packagePriceAmount)}", fontWeight = FontWeight.ExtraBold, color = NestoraMint)
+                            if (!propertyCheckout) Text("₹${"%.0f".format(pack.packagePriceAmount)}", fontWeight = FontWeight.ExtraBold, color = NestoraMint)
                         }
                         if (pack.description.isNotBlank()) Text(pack.description, style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
-                        Text("${pack.durationMinutes} min · ${pack.items.size} work item(s)", style = MaterialTheme.typography.labelSmall, color = Color(0xFF486158))
+                        Text(if (presentation.showDuration) "${pack.durationMinutes} min · ${pack.items.size} work item(s)" else "${pack.items.size} property option(s)", style = MaterialTheme.typography.labelSmall, color = Color(0xFF486158))
                         Text("Includes: ${providerPackageItemsLabel(pack)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF486158), maxLines = 3, overflow = TextOverflow.Ellipsis)
                         if (pack.includedText.isNotBlank()) Text("Package includes: ${pack.includedText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF486158), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (savings > 0) Text("You save ₹${"%.0f".format(savings)}", style = MaterialTheme.typography.labelMedium, color = Color(0xFF14513D), fontWeight = FontWeight.Bold)
+                        if (savings > 0 && !propertyCheckout) Text("You save ₹${"%.0f".format(savings)}", style = MaterialTheme.typography.labelMedium, color = Color(0xFF14513D), fontWeight = FontWeight.Bold)
                         if (pack.excludedText.isNotBlank()) Text("Not included: ${pack.excludedText}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF8A4B00), maxLines = 2, overflow = TextOverflow.Ellipsis)
                         OutlinedButton(
                             onClick = { onSelectPackage(pack.id) },
@@ -229,7 +269,9 @@ internal fun CustomerServiceScopePicker(
                         providerOfferingCustomerDetails(offer).forEach { detail ->
                             Text(detail, style = MaterialTheme.typography.bodySmall, color = Color(0xFF486158), maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
-                        Text("₹${"%.0f".format(offer.priceAmount)} · ${offer.durationMinutes} min each", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+                        if (!propertyCheckout) {
+                            Text(if (presentation.showDuration) "₹${"%.0f".format(offer.priceAmount)} · ${offer.durationMinutes} min each" else "₹${"%.0f".format(offer.priceAmount)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+                        }
                     }
                     if (quantity == 0) {
                         OutlinedButton(
@@ -258,7 +300,8 @@ internal fun CustomerServiceScopePicker(
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("No packages or priced items yet", fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
                 Text(
-                    "This provider has not published a service catalog for this service type. You can still send a custom request using the listing's starting price.",
+                    if (propertyCheckout) "This provider has not published property options yet. You can still send a custom property enquiry."
+                    else "This provider has not published a service catalog for this service type. You can still send a custom request using the listing's starting price.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF60756B)
                 )
@@ -274,8 +317,13 @@ internal fun CustomerServiceScopePicker(
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             RadioButton(selected = useListingPrice, onClick = null)
             Column(modifier = Modifier.weight(1f)) {
-                Text("Custom service request", fontWeight = FontWeight.SemiBold)
-                Text("Starting from ₹${listing.price.toInt()}. The provider may confirm the final work amount before acceptance.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+                Text(if (propertyCheckout) "Custom property enquiry" else "Custom service request", fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (propertyCheckout) "Describe the property you need. Commercial terms are agreed directly with the provider."
+                    else "Starting from ₹${listing.price.toInt()}. The provider may confirm the final work amount before acceptance.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF60756B)
+                )
             }
         }
     }
@@ -285,8 +333,7 @@ internal fun CustomerServiceScopePicker(
                 Text("Your cart", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFF486158))
                 Text(summary.title, fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
                 Text(
-                    if (summary.kind == "LISTING") "Starting from ₹${summary.providerAmount.toInt()} · provider confirms final amount"
-                    else "${summary.itemCount} item(s) · ₹${summary.providerAmount.toInt()} provider amount · ${summary.durationMinutes} min",
+                    customerCheckoutAmountLabel(presentation, summary),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF486158)
                 )
@@ -302,7 +349,7 @@ internal fun CustomerServiceScopePicker(
     ) {
         if (saving) CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp)
         else Text(
-            when (summary?.kind) {
+            if (propertyCheckout) "Continue with enquiry" else when (summary?.kind) {
                 "PACKAGE" -> "Continue with package"
                 "MIXED" -> "Continue with cart"
                 "ITEMS" -> "Continue with cart"
@@ -316,8 +363,10 @@ internal fun CustomerServiceScopePicker(
 @Composable
 private fun SelectedServiceScopeSummary(
     summary: CustomerServiceCartSummary,
+    presentation: CustomerCatalogPresentation,
     onChange: () -> Unit
 ) {
+    val propertyCheckout = presentation.usesPlatformFeeOnlyCheckout()
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -326,17 +375,21 @@ private fun SelectedServiceScopeSummary(
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(if (summary.kind == "PACKAGE") "Selected package" else "Selected service scope", fontWeight = FontWeight.Bold, color = Color(0xFF486158))
+                Text(if (propertyCheckout) "Selected property enquiry" else if (summary.kind == "PACKAGE") "Selected package" else "Selected service scope", fontWeight = FontWeight.Bold, color = Color(0xFF486158))
                 TextButton(onClick = onChange, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) { Text("Change") }
             }
             Text(summary.title, fontWeight = FontWeight.ExtraBold, color = Color(0xFF15231D))
             Text(
-                if (summary.kind == "LISTING") "Starting from ₹${summary.providerAmount.toInt()}; the provider confirms the final amount."
-                else "${summary.itemCount} item(s) · ₹${summary.providerAmount.toInt()} provider amount · ${summary.durationMinutes} min",
+                customerCheckoutAmountLabel(presentation, summary),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF486158)
             )
-            Text("The provider amount is paid directly after work. Nestora's booking fee is handled separately after provider acceptance.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF60756B))
+            Text(
+                if (propertyCheckout) "Property price, rent, deposit, and brokerage are never collected by Nestora."
+                else "The provider amount is paid directly after work. Nestora's booking fee is handled separately after provider acceptance.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF60756B)
+            )
         }
     }
 }
@@ -591,7 +644,7 @@ fun AdaptiveBookingSheet(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Book Service") },
+                title = { Text(if (serviceCatalog?.customerPresentation?.mode == "PROPERTY") "Property enquiry" else "Book Service") },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
                         Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back")
@@ -616,8 +669,9 @@ fun AdaptiveBookingSheet(
                 Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator(color = NestoraMint) }
             } else {
                 val p = policy
-                if (p != null) {
+				if (p != null) {
 					val catalog = serviceCatalog
+					val presentation = catalog?.customerPresentation ?: CustomerCatalogPresentation()
 					val cartSummary = catalog?.let {
 						customerServiceCartSummary(
 							it, selectedPackageId, selectedOfferingQuantities, useListingPriceSelection,
@@ -685,6 +739,7 @@ fun AdaptiveBookingSheet(
 						CustomerServiceScopePicker(
 							listing = listing,
 							catalog = catalog,
+							presentation = presentation,
 							selectedPackageId = selectedPackageId,
 							selectedOfferingQuantities = selectedOfferingQuantities,
 							useListingPrice = useListingPriceSelection,
@@ -712,7 +767,7 @@ fun AdaptiveBookingSheet(
 						error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 					} else {
 						cartSummary?.let { summary ->
-							SelectedServiceScopeSummary(summary = summary, onChange = {
+							SelectedServiceScopeSummary(summary = summary, presentation = presentation, onChange = {
 								serviceSelectionApplied = false
 								selectionNotice = null
 								selectedSlot = null
@@ -728,7 +783,10 @@ fun AdaptiveBookingSheet(
                     }
                     val supportsNow = timeTerms.contains("NOW") && p.providerPreset == "ASAP_ONLY"
                     val supportsExactSlot = (timeTerms.contains("EXACT_SLOT") || timeTerms.contains("RECURRENCE")) && p.providerPreset == "CUSTOM" && availabilitySlots.isNotEmpty()
-                    val flexibleTerms = if (p.providerPreset == "CUSTOM") timeTerms.filter { it in setOf("PREFERRED_TIME_WINDOW", "PREFERRED_DATE_RANGE", "OCCUPANCY_INTERVAL", "SUBSCRIPTION_START", "DEADLINE") } else emptyList()
+                    val flexibleTerms = timeTerms.filter { term ->
+                        term in setOf("PREFERRED_TIME_WINDOW", "PREFERRED_DATE_RANGE", "OCCUPANCY_INTERVAL", "SUBSCRIPTION_START", "DEADLINE") &&
+                            (term != "PREFERRED_TIME_WINDOW" || p.providerPreset == "CUSTOM")
+                    }
                     val activeOptions = buildList {
                         if (supportsNow) add("NOW" to "ASAP")
                         if (supportsExactSlot) add("SCHEDULED" to "Schedule")
@@ -738,7 +796,12 @@ fun AdaptiveBookingSheet(
                         timing = activeOptions.firstOrNull()?.first ?: "NOW"
                     }
                     val isQualified = p.commitmentGate != "DIRECT"
-                    Text(if (isQualified) "Tell us what needs attention" else "Choose when you need the service", fontWeight = FontWeight.Bold)
+                    Text(
+                        if (presentation.mode == "PROPERTY") "Tell the provider what you are looking for"
+                        else if (isQualified) "Tell us what needs attention"
+                        else "Choose when you need the service",
+                        fontWeight = FontWeight.Bold
+                    )
                     if (activeOptions.size > 1) {
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                             activeOptions.forEachIndexed { index, (key, label) ->
@@ -794,16 +857,20 @@ fun AdaptiveBookingSheet(
                         }
                     }
                     if (timing == "FLEXIBLE") {
-                        Text("Preferred time", fontWeight = FontWeight.Bold)
+                        Text(if (presentation.mode == "PROPERTY") "Visit or occupancy preference" else "Preferred time", fontWeight = FontWeight.Bold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             flexibleTerms.forEach { term ->
-                                FilterChip(selected = flexibleTimeTerm == term, onClick = { flexibleTimeTerm = term }, label = { Text(term.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }) })
+                                FilterChip(selected = flexibleTimeTerm == term, onClick = { flexibleTimeTerm = term }, label = { Text(customerFlexibleTermLabel(term)) })
                             }
                         }
                         when (flexibleTimeTerm) {
                             "PREFERRED_DATE_RANGE" -> {
                                 DatePickerField(label = "Start date", value = flexibleStartDate, onValueChange = { flexibleStartDate = it }, modifier = Modifier.fillMaxWidth())
                                 DatePickerField(label = "End date", value = flexibleEndDate, onValueChange = { flexibleEndDate = it }, modifier = Modifier.fillMaxWidth())
+                            }
+                            "OCCUPANCY_INTERVAL" -> {
+                                DatePickerField(label = "Move-in date", value = flexibleStartDate, onValueChange = { flexibleStartDate = it }, modifier = Modifier.fillMaxWidth())
+                                DatePickerField(label = "Move-out date", value = flexibleEndDate, onValueChange = { flexibleEndDate = it }, modifier = Modifier.fillMaxWidth())
                             }
                             "SUBSCRIPTION_START" -> {
                                 DatePickerField(label = "Start date", value = flexibleStartDate, onValueChange = { flexibleStartDate = it }, modifier = Modifier.fillMaxWidth())
@@ -905,7 +972,7 @@ fun AdaptiveBookingSheet(
                     }
                     p.requestSchema?.forEach { schemaItem ->
                         val field = schemaItem.asJsonObject
-                        val key = field.get("key")?.asString ?: return@forEach
+                        val key = field.get("key")?.asString.orEmpty()
                         val label = field.get("label")?.asString ?: key
                         val required = field.get("required")?.asBoolean == true
                         Text(if (required) "$label *" else label, fontWeight = FontWeight.Bold)
@@ -918,8 +985,8 @@ fun AdaptiveBookingSheet(
                             OutlinedTextField(value = answers[key] ?: "", onValueChange = { if (it.length <= 180) answers[key] = it }, modifier = Modifier.fillMaxWidth(), label = { Text(label) })
                         }
                     }
-                    OutlinedTextField(value = note, onValueChange = { if (it.length <= 150) note = it }, modifier = Modifier.fillMaxWidth(), label = { Text(if (isQualified) "Issue or task summary" else "Optional note") }, minLines = if (isQualified) 3 else 1)
-                    Text("Service location", fontWeight = FontWeight.Bold)
+                    OutlinedTextField(value = note, onValueChange = { if (it.length <= 150) note = it }, modifier = Modifier.fillMaxWidth(), label = { Text(if (presentation.mode == "PROPERTY") "Property requirements" else if (isQualified) "Issue or task summary" else "Optional note") }, minLines = if (isQualified) 3 else 1)
+                    Text(if (presentation.mode == "PROPERTY") "Preferred location" else "Service location", fontWeight = FontWeight.Bold)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(initialLocationText.ifBlank { "No location selected" }, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                         TextButton(onClick = onChangeLocationClick) { Text("Change") }
@@ -967,6 +1034,7 @@ fun AdaptiveBookingSheet(
                                         val preference = JsonObject().apply {
                                             when (term) {
                                                 "PREFERRED_DATE_RANGE" -> { addProperty("start_date", flexibleStartDate); addProperty("end_date", flexibleEndDate) }
+                                                "OCCUPANCY_INTERVAL" -> { addProperty("start_at", occupancyDateInstant(flexibleStartDate)); addProperty("end_at", occupancyDateInstant(flexibleEndDate)) }
                                                 "SUBSCRIPTION_START" -> addProperty("start_date", flexibleStartDate)
                                                 "DEADLINE" -> addProperty("deadline_at", deadlineAt)
                                                 else -> { addProperty("start_at", flexibleStartAt); addProperty("end_at", flexibleEndAt) }
@@ -1014,7 +1082,7 @@ fun AdaptiveBookingSheet(
                         enabled = !submitting && validLocation,
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
-                    ) { if (submitting) CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp) else Text(if (p.commitmentGate == "DIRECT") "Request service" else "Send request", fontWeight = FontWeight.Bold) }
+                    ) { if (submitting) CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp) else Text(if (presentation.mode == "PROPERTY") "Send property enquiry" else if (p.commitmentGate == "DIRECT") "Request service" else "Send request", fontWeight = FontWeight.Bold) }
 					}
                 }
             }
