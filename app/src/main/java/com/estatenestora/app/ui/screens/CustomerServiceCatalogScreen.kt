@@ -29,6 +29,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -319,34 +323,15 @@ internal fun CustomerServiceCatalogScreen(
 
     Scaffold(
         topBar = {
-            if (loading || error != null || cartOnly || switchConflict) {
-                TopAppBar(
-                    title = { Text(if (cartOnly) "Your cart" else "Provider services", fontWeight = FontWeight.Bold) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                    },
-                    actions = {
-                        if (!cartOnly) {
-                            IconButton(onClick = {
-                                if (currentCart == null) {
-                                    scope.launch { snackbarHostState.showSnackbar("Your cart is empty. Add a package or service first.") }
-                                } else {
-                                    onOpenCart()
-                                }
-                            }) {
-                                BadgedBox(
-                                    badge = {
-                                        currentCart?.let { cart ->
-                                            Badge { Text(cart.itemCount.coerceAtLeast(1).toString()) }
-                                        }
-                                    }
-                                ) {
-                                    Icon(Icons.Default.ShoppingCart, contentDescription = "Open cart", tint = NestoraMint)
-                                }
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+            if (cartOnly) {
+                StorefrontUrbanCompanyTopBar(
+                    title = "Your cart",
+                    subtitle = listing.providerName,
+                    isScrolled = true,
+                    onBack = onBack,
+                    showSearch = false,
+                    showShare = false,
+                    showCart = false
                 )
             }
         },
@@ -382,65 +367,111 @@ internal fun CustomerServiceCatalogScreen(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
-                loading -> Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
-                    StorefrontUrbanCompanyHero(listing)
-                    Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = NestoraMint)
+                loading -> {
+                    if (cartOnly) {
+                        Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = NestoraMint)
+                        }
+                    } else {
+                        Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
+                            StorefrontUrbanCompanyHero(
+                                listing = listing,
+                                managedMedia = emptyList(),
+                                onResolveMedia = onResolveMedia
+                            )
+                            Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = NestoraMint)
+                            }
+                        }
+                        StorefrontUrbanCompanyTopBar(
+                            title = listing.title,
+                            subtitle = "by ${listing.providerName}",
+                            isScrolled = false,
+                            cartItemCount = currentCart?.itemCount ?: 0,
+                            onBack = onBack,
+                            onSearch = {},
+                            onShare = {},
+                            onCart = {
+                                if (currentCart == null) {
+                                    scope.launch { snackbarHostState.showSnackbar("Your cart is empty. Add a package or service first.") }
+                                } else {
+                                    onOpenCart()
+                                }
+                            }
+                        )
                     }
                 }
-                error != null -> Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
-                    StorefrontUrbanCompanyHero(listing)
-                    HorizontalDivider(thickness = 8.dp, color = Color(0xFFEFF2F1))
-                    Column(
-                        modifier = Modifier.fillMaxWidth().background(Color.White).padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
-                        Button(
-                            onClick = {
-                                loading = true
-                                error = null
-                                scope.launch {
-                                    val response = onFetchCatalog(listing.id)
-                                    catalog = response?.serviceCatalog
-                                    error = if (response?.ok == true && catalog != null) null else response?.reply ?: "Could not load provider services."
-                                    loading = false
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
-                        ) { Text("Try again") }
+                error != null -> {
+                    Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
+                        if (!cartOnly) {
+                            StorefrontUrbanCompanyHero(
+                                listing = listing,
+                                managedMedia = emptyList(),
+                                onResolveMedia = onResolveMedia
+                            )
+                            HorizontalDivider(thickness = 8.dp, color = Color(0xFFEFF2F1))
+                        }
+                        Column(
+                            modifier = Modifier.fillMaxWidth().background(Color.White).padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                            Button(
+                                onClick = {
+                                    loading = true
+                                    error = null
+                                    scope.launch {
+                                        val response = onFetchCatalog(listing.id)
+                                        catalog = response?.serviceCatalog
+                                        error = if (response?.ok == true && catalog != null) null else response?.reply ?: "Could not load provider services."
+                                        loading = false
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = NestoraMint)
+                            ) { Text("Try again") }
+                        }
+                    }
+                    if (!cartOnly) {
+                        StorefrontUrbanCompanyTopBar(
+                            title = listing.title,
+                            subtitle = "by ${listing.providerName}",
+                            isScrolled = false,
+                            cartItemCount = currentCart?.itemCount ?: 0,
+                            onBack = onBack,
+                            onSearch = {},
+                            onShare = {},
+                            onCart = { onOpenCart() }
+                        )
                     }
                 }
                 catalog != null && !switchConflict -> {
                     val loaded = requireNotNull(catalog)
                     if (cartOnly) {
                         Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
-                            StorefrontUrbanCompanyHero(listing)
-                            HorizontalDivider(thickness = 8.dp, color = Color(0xFFEFF2F1))
                             CustomerCartReview(
-                            listing = listing,
-                            catalog = loaded,
-                            selectedPackageId = selectedPackageId,
-                            quantities = quantities,
-                            useListingPrice = useListingPrice,
-                            presentation = loaded.customerPresentationOrDefault(),
-                            onRemovePackage = {
-                                selectedPackageId = null
-                                updateCart(nextPackageId = null)
-                            },
-                            onChangeQuantity = { id, quantity ->
-                                if (quantity <= 0) quantities.remove(id) else quantities[id] = 1
-                                updateCart(nextQuantities = quantities.toMap())
-                            },
-                            onClear = {
-                                selectedPackageId = null
-                                quantities.clear()
-                                useListingPrice = false
-                                onCartChanged(null)
-                            }
+                                listing = listing,
+                                catalog = loaded,
+                                selectedPackageId = selectedPackageId,
+                                quantities = quantities,
+                                useListingPrice = useListingPrice,
+                                presentation = loaded.customerPresentationOrDefault(),
+                                onRemovePackage = {
+                                    selectedPackageId = null
+                                    updateCart(nextPackageId = null)
+                                },
+                                onChangeQuantity = { id, quantity ->
+                                    if (quantity <= 0) quantities.remove(id) else quantities[id] = 1
+                                    updateCart(nextQuantities = quantities.toMap())
+                                },
+                                onClear = {
+                                    selectedPackageId = null
+                                    quantities.clear()
+                                    useListingPrice = false
+                                    onCartChanged(null)
+                                }
                             )
-                            Spacer(Modifier.height(20.dp))
+                            Spacer(Modifier.height(100.dp))
                         }
                     } else {
                         CustomerProviderStorefront(
@@ -724,7 +755,7 @@ private fun CustomerProviderStorefront(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun StorefrontUrbanCompanyHero(
+internal fun StorefrontUrbanCompanyHero(
     listing: ServiceListing,
     managedMedia: List<MediaAsset> = emptyList(),
     onResolveMedia: suspend (String) -> String? = { null }
@@ -765,17 +796,41 @@ private fun StorefrontUrbanCompanyHero(
             }
             if (carousel.size > 1) {
                 Surface(
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                    color = Color.Black.copy(alpha = 0.68f),
-                    shape = RoundedCornerShape(20.dp)
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 14.dp),
+                    color = Color.Black.copy(alpha = 0.42f),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text(
-                        "${pagerState.currentPage + 1}/${carousel.size}",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        repeat(carousel.size) { pageIndex ->
+                            val isSelected = pagerState.currentPage == pageIndex
+                            val animatedWidth by animateDpAsState(
+                                targetValue = if (isSelected) 18.dp else 6.dp,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessLow
+                                ),
+                                label = "carousel_dot_width"
+                            )
+                            val animatedColor by animateColorAsState(
+                                targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.45f),
+                                animationSpec = tween(durationMillis = 250),
+                                label = "carousel_dot_color"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .height(6.dp)
+                                    .width(animatedWidth)
+                                    .clip(CircleShape)
+                                    .background(animatedColor)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -784,13 +839,15 @@ private fun StorefrontUrbanCompanyHero(
 }
 
 @Composable
-private fun StorefrontCarouselImage(
+internal fun StorefrontCarouselImage(
     media: MediaAsset?,
     fallbackPhotoUrl: String?,
     title: String,
     onResolveMedia: suspend (String) -> String?
 ) {
-    val fileId = remember(media?.id) { media?.fileIdFor("HERO") }
+    val fileId = remember(media?.id, fallbackPhotoUrl) {
+        media?.fileIdFor("HERO") ?: fallbackPhotoUrl?.takeIf { !it.startsWith("http") && !it.startsWith("/") && !it.startsWith("file:") }
+    }
     var resolvedPath by remember(fileId) { mutableStateOf<String?>(null) }
     LaunchedEffect(fileId) { resolvedPath = fileId?.let { onResolveMedia(it) } }
     val image = resolvedPath ?: fallbackPhotoUrl?.takeIf(String::isNotBlank)
@@ -903,19 +960,22 @@ private fun StorefrontShortcutImage(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun StorefrontUrbanCompanyTopBar(
+internal fun StorefrontUrbanCompanyTopBar(
     title: String,
     subtitle: String,
     isScrolled: Boolean,
-    isSearchExpanded: Boolean,
-    searchQuery: String,
-    cartItemCount: Int,
+    isSearchExpanded: Boolean = false,
+    searchQuery: String = "",
+    cartItemCount: Int = 0,
     onBack: () -> Unit,
-    onSearch: () -> Unit,
-    onSearchQueryChange: (String) -> Unit,
-    onCloseSearch: () -> Unit,
-    onShare: () -> Unit,
-    onCart: () -> Unit
+    onSearch: () -> Unit = {},
+    onSearchQueryChange: (String) -> Unit = {},
+    onCloseSearch: () -> Unit = {},
+    onShare: () -> Unit = {},
+    onCart: () -> Unit = {},
+    showSearch: Boolean = true,
+    showShare: Boolean = true,
+    showCart: Boolean = true
 ) {
     val searchFocusRequester = remember { FocusRequester() }
     val backgroundColor by animateColorAsState(if (isScrolled || isSearchExpanded) Color.White else Color.Transparent, label = "bg")
@@ -987,15 +1047,19 @@ private fun StorefrontUrbanCompanyTopBar(
                     }
                 }
                 if (!isSearchExpanded) {
-                    StorefrontHeaderAction(onClick = onSearch, contentDescription = "Search") {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(20.dp))
+                    if (showSearch) {
+                        StorefrontHeaderAction(onClick = onSearch, contentDescription = "Search") {
+                            Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(20.dp))
+                        }
                     }
-                    Spacer(Modifier.width(7.dp))
-                    StorefrontHeaderAction(onClick = onShare, contentDescription = "Share") {
-                        Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(19.dp))
+                    if (showShare) {
+                        if (showSearch) Spacer(Modifier.width(7.dp))
+                        StorefrontHeaderAction(onClick = onShare, contentDescription = "Share") {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(19.dp))
+                        }
                     }
-                    if (cartItemCount > 0) {
-                        Spacer(Modifier.width(7.dp))
+                    if (showCart && cartItemCount > 0) {
+                        if (showSearch || showShare) Spacer(Modifier.width(7.dp))
                         StorefrontHeaderAction(onClick = onCart, contentDescription = "Cart") {
                             BadgedBox(badge = { Badge { Text(cartItemCount.toString()) } }) {
                                 Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = Color(0xFF14201B), modifier = Modifier.size(19.dp))
@@ -1010,7 +1074,7 @@ private fun StorefrontUrbanCompanyTopBar(
 }
 
 @Composable
-private fun StorefrontHeaderAction(
+internal fun StorefrontHeaderAction(
     onClick: () -> Unit,
     contentDescription: String,
     content: @Composable () -> Unit
