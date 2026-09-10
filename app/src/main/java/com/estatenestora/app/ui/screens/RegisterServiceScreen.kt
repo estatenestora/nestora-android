@@ -36,6 +36,7 @@ import com.estatenestora.app.data.model.Category
 import com.estatenestora.app.data.model.GeocodePlace
 import com.estatenestora.app.data.model.ServiceAttributeTemplate
 import com.estatenestora.app.data.model.ServiceType
+import com.estatenestora.app.data.model.serviceTypeDisplayName
 import com.estatenestora.app.ui.theme.*
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Close
@@ -347,7 +348,7 @@ fun RegisterServiceScreen(
                 FormFieldWrapper(hint = "Select the specific service role or job type.") {
                     Box(modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
-                            value = selectedServiceType?.let { "${it.emoji} ${it.name}" } ?: "",
+                            value = selectedServiceType?.let { "${it.emoji} ${serviceTypeDisplayName(it.name)}" } ?: "",
                             onValueChange = {},
                             readOnly = true,
                             label = { Text("Service Type") },
@@ -422,7 +423,7 @@ fun RegisterServiceScreen(
                     Spacer(Modifier.height(4.dp))
                     SectionLabel("Service Details")
                     Text(
-                        text = "Specific details for ${selectedServiceType?.name ?: "this service type"}.",
+                        text = "Specific details for ${selectedServiceType?.let { serviceTypeDisplayName(it.name) } ?: "this service type"}.",
                         fontSize = 12.sp,
                         color = mutedColor,
                         modifier = Modifier.padding(bottom = 12.dp)
@@ -808,7 +809,7 @@ fun RegisterServiceScreen(
                 title = "Select Service Type",
                 searchPlaceholder = "Search service types...",
                 items = listToShow,
-                itemToText = { it.name },
+                itemToText = { serviceTypeDisplayName(it.name.ifBlank { it.slug }) },
                 itemToEmoji = { it.emoji },
                 grouping = { st ->
                     groupLookup[st.categorySlug]?.name ?: "Other"

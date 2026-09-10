@@ -822,7 +822,7 @@ class NestoraRepository {
      * widget for each attribute after the user picks a service type.
      */
     suspend fun getServiceAttributes(serviceTypeSlug: String): List<com.estatenestora.app.data.model.ServiceAttributeTemplate> = withContext(Dispatchers.IO) {
-        sendBridgeQuery("GET_SERVICE_ATTRS::$serviceTypeSlug")?.serviceAttributes ?: emptyList()
+        sendBridgeQuery("GET_SERVICE_ATTRS::${canonicalServiceTypeSlug(serviceTypeSlug)}")?.serviceAttributes ?: emptyList()
     }
 
     // =========================================================================
@@ -885,7 +885,7 @@ class NestoraRepository {
 
     suspend fun searchByServiceType(serviceTypeSlug: String, addressBarLatitude: Double? = null, addressBarLongitude: Double? = null): AndroidBridgeResponse? = withContext(Dispatchers.IO) {
         loadDiscovery(
-            withAddressBarCoordinates("SEARCH_SERVICE_TYPE::$serviceTypeSlug", addressBarLatitude, addressBarLongitude),
+            withAddressBarCoordinates("SEARCH_SERVICE_TYPE::${canonicalServiceTypeSlug(serviceTypeSlug)}", addressBarLatitude, addressBarLongitude),
             DiscoveryRecoveryPolicy.SEARCH_TTL_MS,
             isEmptyList = { it.listings.isNullOrEmpty() }
         )
@@ -1058,13 +1058,13 @@ class NestoraRepository {
         // base64url chunks to stay within Telegram's inline-query input limit.
         val payload = com.google.gson.JsonObject().apply {
             addProperty("category_slug", form.categorySlug)
-            addProperty("service_type_slug", form.serviceTypeSlug)
+            addProperty("service_type_slug", canonicalServiceTypeSlug(form.serviceTypeSlug))
             addProperty("location_display_name", form.locationDisplayName)
             addProperty("city", form.city)
             addProperty("latitude", form.latitude)
             addProperty("longitude", form.longitude)
         }
-        val started = sendRegistrationBridgeStep("REGISTER_SERVICE_START::${form.serviceTypeSlug}")
+        val started = sendRegistrationBridgeStep("REGISTER_SERVICE_START::${canonicalServiceTypeSlug(form.serviceTypeSlug)}")
             ?: return@withContext null
         if (!started.ok || started.registrationToken.isNullOrBlank()) return@withContext started
 

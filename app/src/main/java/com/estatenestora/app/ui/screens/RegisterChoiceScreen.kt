@@ -60,6 +60,7 @@ import coil.compose.AsyncImage
 import com.estatenestora.app.data.model.AndroidBridgeResponse
 import com.estatenestora.app.data.model.Category
 import com.estatenestora.app.data.model.ServiceType
+import com.estatenestora.app.data.model.serviceTypeDisplayName
 import com.estatenestora.app.ui.theme.*
 import com.estatenestora.app.ui.theme.NestoraMint
 import com.estatenestora.app.ui.theme.RoyalTheme
@@ -1386,7 +1387,7 @@ fun ProviderListingsScreen(
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Text(
-                                        text = if (selectedServiceTypeFilter == "All") "Service Type" else selectedServiceTypeFilter.replace("_", " ").replaceFirstChar { it.uppercase() },
+                                        text = if (selectedServiceTypeFilter == "All") "Service Type" else formatServiceTypeDisplayName(selectedServiceTypeFilter),
                                         fontSize = 12.sp,
                                         color = if (selectedServiceTypeFilter != "All") NestoraMint else Color(0xFF444444)
                                     )
@@ -1407,7 +1408,7 @@ fun ProviderListingsScreen(
                             ) {
                                 uniqueServiceTypes.forEach { st ->
                                     DropdownMenuItem(
-                                        text = { Text(st.replace("_", " ").replaceFirstChar { it.uppercase() }) },
+                                        text = { Text(formatServiceTypeDisplayName(st)) },
                                         onClick = {
                                             selectedServiceTypeFilter = st
                                             serviceTypeMenuExpanded = false
@@ -2215,6 +2216,7 @@ private fun ProviderPackagesWorkspace(
         } else {
             var listingMenuOpen by remember { mutableStateOf(false) }
             val listing = listings.firstOrNull { it.id == selectedListingId } ?: listings.first()
+            val workspaceTypeLabel = serviceTypeDisplayName(listing.serviceType)
             Box {
                 Surface(
                     modifier = Modifier.fillMaxWidth().clickable { listingMenuOpen = true },
@@ -2222,8 +2224,8 @@ private fun ProviderPackagesWorkspace(
                 ) {
                     Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("Package workspace · shared across your ${listing.serviceType} listings", fontSize = 10.sp, color = Color(0xFF60756B))
-                            Text(listing.serviceType, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
+                            Text("Package workspace · shared across your $workspaceTypeLabel listings", fontSize = 10.sp, color = Color(0xFF60756B))
+                            Text(workspaceTypeLabel, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
                         }
                         Icon(Icons.Default.KeyboardArrowDown, null, tint = Color(0xFF60756B))
                     }
@@ -2493,10 +2495,65 @@ internal const val WORK_ITEM_OTHER_OPTION = "Other"
 internal const val DEFAULT_WORK_ITEM_DURATION_MINUTES = 60
 internal const val DEFAULT_WORK_ITEM_TITLE = "Work item"
 
-internal fun workItemSupportsOtherOption(key: String): Boolean =
-    key in setOf("property_types", "parking", "amenities")
+internal fun formatServiceTypeDisplayName(raw: String): String =
+    com.estatenestora.app.data.model.serviceTypeDisplayName(raw)
 
-internal fun workItemUsesSecurityDepositEditor(key: String): Boolean = key == "security_deposit"
+internal fun workItemSupportsOtherOption(key: String): Boolean =
+    key in setOf(
+        "property_types",
+        "property_type",
+        "property_types_handled",
+        "preferred_tenants",
+        "tenant_preference",
+        "parking",
+        "amenities"
+    )
+
+internal fun normalizeWorkItemAttributeKey(raw: String): String =
+    raw.trim()
+        .replace(Regex("([a-z0-9])([A-Z])"), "$1_$2")
+        .lowercase()
+        .replace("-", "_")
+        .replace(" ", "_")
+
+internal fun workItemHasRentAndSellOptions(options: List<String>?): Boolean {
+    val catalog = options.orEmpty()
+    return catalog.any { it.equals("Rent", ignoreCase = true) } &&
+        catalog.any { it.equals("Sell", ignoreCase = true) }
+}
+
+internal fun isDealTypesWorkItemAttribute(
+    key: String,
+    displayLabel: String = "",
+    options: List<String>? = null
+): Boolean {
+    val normalized = normalizeWorkItemAttributeKey(key)
+    if (normalized == "deal_types" || normalized == "deal_type") return true
+    if (displayLabel.contains("deal type", ignoreCase = true)) return true
+    return workItemHasRentAndSellOptions(options)
+}
+
+internal fun isDealTypesWorkItemAttribute(
+    template: com.estatenestora.app.data.model.ServiceAttributeTemplate
+): Boolean = isDealTypesWorkItemAttribute(template.key, template.displayLabel, template.options)
+
+internal fun isPropertyTypesHandledAttribute(
+    template: com.estatenestora.app.data.model.ServiceAttributeTemplate
+): Boolean {
+    val normalized = normalizeWorkItemAttributeKey(template.key)
+    return normalized == "property_types" || normalized == "property_types_handled"
+}
+
+internal fun workItemUsesSecurityDepositEditor(key: String): Boolean {
+    val normalized = normalizeWorkItemAttributeKey(key)
+    return normalized == "security_deposit" || normalized == "security_deposits"
+}
+
+internal fun isSecurityDepositWorkItemAttribute(
+    template: com.estatenestora.app.data.model.ServiceAttributeTemplate
+): Boolean =
+    workItemUsesSecurityDepositEditor(template.key) ||
+        template.displayLabel.contains("security deposit", ignoreCase = true)
 
 internal fun securityDepositYearOptions(): List<Int> = (0..10).toList()
 
@@ -2532,6 +2589,7 @@ internal fun workItemOtherFieldLabel(displayLabel: String): String {
     val singular = when {
         cleaned.endsWith("ies", ignoreCase = true) -> cleaned.dropLast(3) + "y"
         cleaned.endsWith("Types", ignoreCase = true) -> cleaned.dropLast(5) + "Type"
+        cleaned.endsWith("Tenants", ignoreCase = true) -> cleaned.dropLast(7) + "Tenant"
         else -> cleaned
     }
     return "Other $singular"
@@ -2539,11 +2597,15 @@ internal fun workItemOtherFieldLabel(displayLabel: String): String {
 
 internal fun parseWorkItemChoiceSelection(raw: String, catalogOptions: List<String>): WorkItemChoiceSelection {
     val catalog = catalogOptions.filter { !it.equals(WORK_ITEM_OTHER_OPTION, ignoreCase = true) }
-    val catalogSet = catalog.toSet()
     val tokens = parseCsvAttributeValues(raw)
-    val catalogSelected = tokens.filter { it in catalogSet }.toSet()
+    val catalogSelected = tokens.mapNotNull { token ->
+        catalog.firstOrNull { it.equals(token, ignoreCase = true) }
+    }.toSet()
     val extraChips = tokens
-        .filter { it !in catalogSet && !it.equals(WORK_ITEM_OTHER_OPTION, ignoreCase = true) }
+        .filter { token ->
+            catalog.none { it.equals(token, ignoreCase = true) } &&
+                !token.equals(WORK_ITEM_OTHER_OPTION, ignoreCase = true)
+        }
         .map { displayWorkItemOtherValue(it) }
         .filter { it.isNotBlank() }
         .distinctBy { it.lowercase() }
@@ -2656,12 +2718,15 @@ private val BROKER_DEAL_TYPE_EXCLUDED = setOf("buy", "pg", "commercial", "plot")
 internal fun coerceSingleChoiceCsv(raw: String): String =
     parseCsvAttributeValues(raw).firstOrNull().orEmpty()
 
-internal fun workItemChoiceIsSingleSelect(key: String, inputType: String): Boolean =
-    inputType == "select" ||
-        key == "deal_types" ||
-        key == "property_types" ||
-        key == "property_types_handled" ||
-        key == "furnishing"
+internal fun workItemChoiceIsSingleSelect(key: String, inputType: String): Boolean {
+    val normalized = normalizeWorkItemAttributeKey(key)
+    return inputType == "select" ||
+        isDealTypesWorkItemAttribute(key) ||
+        normalized == "property_types" ||
+        normalized == "property_type" ||
+        normalized == "property_types_handled" ||
+        normalized == "furnishing"
+}
 
 internal fun workItemChoiceChipEnabled(
     singleSelect: Boolean,
@@ -2669,8 +2734,56 @@ internal fun workItemChoiceChipEnabled(
     exclusiveSelectionTaken: Boolean
 ): Boolean = !singleSelect || thisChosen || !exclusiveSelectionTaken
 
-internal fun isBrokerWorkItemEditor(serviceTypeSlug: String): Boolean =
-    serviceTypeSlug.equals("broker", ignoreCase = true)
+internal val PROPERTY_OWNER_PROPERTY_TYPE_OPTIONS = listOf(
+    "Apartment Flat",
+    "Independent House",
+    "Villa",
+    "Penthouse",
+    "Builder Floor"
+)
+internal val PROPERTY_OWNER_PREFERRED_TENANT_OPTIONS = listOf(
+    "Family",
+    "Bachelors (Men)",
+    "Bachelors (Women)",
+    "Company Lease"
+)
+
+internal fun isPropertyOwnerWorkItemEditor(
+    serviceTypeSlug: String,
+    templates: List<com.estatenestora.app.data.model.ServiceAttributeTemplate> = emptyList()
+): Boolean {
+    if (com.estatenestora.app.data.model.isPropertyOwnerServiceTypeSlug(serviceTypeSlug)) return true
+    return templates.any { template ->
+        val normalized = normalizeWorkItemAttributeKey(template.key)
+        normalized == "property_type" ||
+            normalized == "tenant_preference" ||
+            normalized == "preferred_tenants"
+    }
+}
+
+internal fun isBrokerWorkItemEditor(serviceTypeSlug: String): Boolean {
+    val slug = com.estatenestora.app.data.model.canonicalServiceTypeSlug(serviceTypeSlug)
+    return slug == "broker" ||
+        slug == "rental_agent" ||
+        slug == "property_dealer"
+}
+
+internal fun workItemUsesBrokerDealUi(
+    serviceTypeSlug: String,
+    templates: List<com.estatenestora.app.data.model.ServiceAttributeTemplate>
+): Boolean =
+    isBrokerWorkItemEditor(serviceTypeSlug) ||
+        isPropertyOwnerWorkItemEditor(serviceTypeSlug, templates) ||
+        templates.any { isDealTypesWorkItemAttribute(it) }
+
+internal fun selectedBrokerDealTypes(raw: String): List<String> {
+    val parsed = parseWorkItemChoiceSelection(raw, BROKER_DEAL_TYPE_OPTIONS)
+    val selected = parsed.catalogSelected + parsed.extraSelected
+    if (selected.isNotEmpty()) return selected.toList()
+    return parseCsvAttributeValues(raw).filter { token ->
+        BROKER_DEAL_TYPE_OPTIONS.any { it.equals(token, ignoreCase = true) }
+    }
+}
 
 internal fun brokerPriceFieldLabel(dealValues: List<String>): String {
     val rent = dealValues.any { it.equals("Rent", ignoreCase = true) }
@@ -2679,6 +2792,16 @@ internal fun brokerPriceFieldLabel(dealValues: List<String>): String {
         rent && !sell -> "Rent Price (₹) *"
         sell && !rent -> "Selling Price (₹) *"
         else -> "Price (₹) *"
+    }
+}
+
+internal fun brokerPriceFieldPlaceholder(dealValues: List<String>): String {
+    val rent = dealValues.any { it.equals("Rent", ignoreCase = true) }
+    val sell = dealValues.any { it.equals("Sell", ignoreCase = true) }
+    return when {
+        rent && !sell -> "Enter monthly rent"
+        sell && !rent -> "Enter selling price"
+        else -> "Enter price"
     }
 }
 
@@ -2705,14 +2828,19 @@ internal fun orderedBrokerWorkItemTemplates(
     templates: List<com.estatenestora.app.data.model.ServiceAttributeTemplate>,
     hideSecurityDeposit: Boolean
 ): List<com.estatenestora.app.data.model.ServiceAttributeTemplate> {
-    val deal = templates.firstOrNull { it.key == "deal_types" }
-    val prop = templates.firstOrNull { it.key == "property_types" }
-    val security = templates.firstOrNull { it.key == "security_deposit" }
-    val rest = templates.filter { it.key !in setOf("deal_types", "property_types", "security_deposit") }
+    val deal = templates.firstOrNull { isDealTypesWorkItemAttribute(it) }
+    val propHandled = templates.firstOrNull { isPropertyTypesHandledAttribute(it) }
+    val security = templates.firstOrNull { isSecurityDepositWorkItemAttribute(it) }
+    val propertyType = templates.firstOrNull { it.key == "property_type" }
+    val preferredTenants = templates.firstOrNull { it.key == "preferred_tenants" || it.key == "tenant_preference" }
+    val topKeys = setOfNotNull(deal?.key, propHandled?.key, security?.key, propertyType?.key, preferredTenants?.key)
+    val rest = templates.filter { it.key !in topKeys }
     return buildList {
         deal?.let(::add)
-        prop?.let(::add)
+        propHandled?.let(::add)
         if (!hideSecurityDeposit) security?.let(::add)
+        propertyType?.let(::add)
+        preferredTenants?.let(::add)
         addAll(rest)
     }
 }
@@ -2744,8 +2872,9 @@ internal fun sanitizeBrokerAttributeTemplates(
     templates: List<com.estatenestora.app.data.model.ServiceAttributeTemplate>
 ): List<com.estatenestora.app.data.model.ServiceAttributeTemplate> =
     templates.map { template ->
-        when (template.key) {
-            "deal_types" -> template.copy(
+        when (normalizeWorkItemAttributeKey(template.key)) {
+            "deal_types", "deal_type" -> template.copy(
+                key = "deal_types",
                 displayLabel = "Deal Types",
                 options = BROKER_DEAL_TYPE_OPTIONS,
                 isRequired = true
@@ -2755,9 +2884,73 @@ internal fun sanitizeBrokerAttributeTemplates(
                 displayLabel = "Property Types Handled",
                 options = mergeBrokerPropertyTypeOptions(template.options)
             )
+            "property_type" -> template.copy(
+                displayLabel = "Property Type",
+                inputType = "select",
+                options = template.options.orEmpty().ifEmpty { PROPERTY_OWNER_PROPERTY_TYPE_OPTIONS }
+            )
+            "preferred_tenants", "tenant_preference" -> template.copy(
+                displayLabel = "Preferred Tenants",
+                inputType = "multiselect",
+                options = template.options.orEmpty().ifEmpty { PROPERTY_OWNER_PREFERRED_TENANT_OPTIONS }
+            )
             else -> template
         }
     }
+
+internal fun withPropertyOwnerBrokerFields(
+    templates: List<com.estatenestora.app.data.model.ServiceAttributeTemplate>
+): List<com.estatenestora.app.data.model.ServiceAttributeTemplate> {
+    val list = sanitizeBrokerAttributeTemplates(templates).toMutableList()
+    if (list.none { isDealTypesWorkItemAttribute(it) }) {
+        list.add(
+            0,
+            com.estatenestora.app.data.model.ServiceAttributeTemplate(
+                key = "deal_types",
+                displayLabel = "Deal Types",
+                inputType = "multiselect",
+                options = BROKER_DEAL_TYPE_OPTIONS,
+                isRequired = true
+            )
+        )
+    }
+    if (list.none { isPropertyTypesHandledAttribute(it) }) {
+        val dealIndex = list.indexOfFirst { isDealTypesWorkItemAttribute(it) }
+        list.add(
+            if (dealIndex >= 0) dealIndex + 1 else 0,
+            com.estatenestora.app.data.model.ServiceAttributeTemplate(
+                key = "property_types",
+                displayLabel = "Property Types Handled",
+                inputType = "multiselect",
+                options = mergeBrokerPropertyTypeOptions(null),
+                isRequired = false
+            )
+        )
+    }
+    if (list.none { it.key == "property_type" }) {
+        list.add(
+            com.estatenestora.app.data.model.ServiceAttributeTemplate(
+                key = "property_type",
+                displayLabel = "Property Type",
+                inputType = "select",
+                options = PROPERTY_OWNER_PROPERTY_TYPE_OPTIONS,
+                isRequired = false
+            )
+        )
+    }
+    if (list.none { it.key == "tenant_preference" || it.key == "preferred_tenants" }) {
+        list.add(
+            com.estatenestora.app.data.model.ServiceAttributeTemplate(
+                key = "tenant_preference",
+                displayLabel = "Preferred Tenants",
+                inputType = "multiselect",
+                options = PROPERTY_OWNER_PREFERRED_TENANT_OPTIONS,
+                isRequired = false
+            )
+        )
+    }
+    return list
+}
 
 internal fun workItemAttributeIsInvalid(
     template: com.estatenestora.app.data.model.ServiceAttributeTemplate,
@@ -2791,6 +2984,31 @@ internal fun workItemAttributeIsInvalid(
     return encodeWorkItemChoiceValues(catalogSelected, extraSelected).isBlank()
 }
 
+@Composable
+private fun WorkItemPriceField(
+    price: String,
+    onPriceChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    invalid: Boolean
+) {
+    key(label) {
+        OutlinedTextField(
+            value = price,
+            onValueChange = { onPriceChange(it.filter(Char::isDigit)) },
+            label = { Text(label) },
+            placeholder = { Text(placeholder) },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            isError = invalid,
+            supportingText = if (invalid) {
+                { Text("Enter a valid price.") }
+            } else null
+        )
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun ProviderWorkItemEditor(
@@ -2802,9 +3020,14 @@ private fun ProviderWorkItemEditor(
     serviceTypeSlug: String = "",
     onSave: (com.google.gson.JsonObject) -> Unit
 ) {
-    val isBroker = isBrokerWorkItemEditor(serviceTypeSlug)
-    val sanitizedTemplates = remember(attributeTemplates, isBroker) {
-        if (isBroker) sanitizeBrokerAttributeTemplates(attributeTemplates) else attributeTemplates
+    val isPropertyOwner = isPropertyOwnerWorkItemEditor(serviceTypeSlug, attributeTemplates)
+    val isBroker = workItemUsesBrokerDealUi(serviceTypeSlug, attributeTemplates)
+    val sanitizedTemplates = remember(attributeTemplates, isBroker, isPropertyOwner) {
+        when {
+            isPropertyOwner -> withPropertyOwnerBrokerFields(attributeTemplates)
+            isBroker -> sanitizeBrokerAttributeTemplates(attributeTemplates)
+            else -> attributeTemplates
+        }
     }
     var label by remember(existing) { mutableStateOf(existing?.title.orEmpty()) }
     var price by remember(existing) { mutableStateOf(existing?.priceAmount?.takeIf { it > 0 }?.toInt()?.toString().orEmpty()) }
@@ -2884,16 +3107,28 @@ private fun ProviderWorkItemEditor(
         return attributeValues[template.key].orEmpty()
     }
 
-    val dealTypesTemplate = sanitizedTemplates.firstOrNull { it.key == "deal_types" }
-    val currentDealTypes = dealTypesTemplate?.let { currentAttributeValue(it) }.orEmpty()
-    val dealTypesList = parseCsvAttributeValues(currentDealTypes)
-    val hideSecurityDeposit = isBroker && brokerHidesSecurityDeposit(dealTypesList)
-    val priceLabel = if (isBroker) brokerPriceFieldLabel(dealTypesList) else "Price (₹) *"
+    val hasDealTypeField = sanitizedTemplates.any { isDealTypesWorkItemAttribute(it) }
+    var selectedDealType by remember(existing, sanitizedTemplates.map { it.key }) {
+        val stored = sanitizedTemplates
+            .filter { isDealTypesWorkItemAttribute(it) }
+            .flatMap { selectedBrokerDealTypes(savedAttributeText[it.key].orEmpty()) }
+            .firstOrNull()
+            .orEmpty()
+        mutableStateOf(stored)
+    }
+    val storedDealTypes = sanitizedTemplates
+        .filter { isDealTypesWorkItemAttribute(it) }
+        .flatMap { template -> selectedBrokerDealTypes(attributeValues[template.key].orEmpty()) }
+    val dealTypesList = (listOfNotNull(selectedDealType.takeIf { it.isNotBlank() }) + storedDealTypes)
+        .distinctBy { it.lowercase() }
+    val hideSecurityDeposit = brokerHidesSecurityDeposit(dealTypesList)
+    val priceLabel = if (hasDealTypeField) brokerPriceFieldLabel(dealTypesList) else "Price (₹) *"
+    val pricePlaceholder = if (hasDealTypeField) brokerPriceFieldPlaceholder(dealTypesList) else "Enter price"
 
-    val invalidLabel = showValidation && isBroker && label.trim().isBlank()
+    val invalidLabel = showValidation && hasDealTypeField && label.trim().isBlank()
     val invalidPrice = showValidation && price.toDoubleOrNull() == null
 
-    if (isBroker) {
+    if (hasDealTypeField) {
         OutlinedTextField(
             value = label,
             onValueChange = { label = it },
@@ -2916,37 +3151,33 @@ private fun ProviderWorkItemEditor(
         Text("Service details", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15231D))
         Text("Add the details that make this work item clear to customers.", fontSize = 11.sp, color = Color(0xFF60756B))
 
-        val orderedTemplates = remember(sanitizedTemplates, hideSecurityDeposit, isBroker) {
-            if (isBroker) {
-                orderedBrokerWorkItemTemplates(sanitizedTemplates, hideSecurityDeposit)
-            } else {
-                sanitizedTemplates
-            }
+        val orderedTemplates = if (hasDealTypeField) {
+            orderedBrokerWorkItemTemplates(sanitizedTemplates, hideSecurityDeposit)
+        } else {
+            sanitizedTemplates
         }
 
         var priceRendered = false
 
         orderedTemplates.forEach { template ->
-            if (!priceRendered && template.key != "deal_types" && template.key != "property_types") {
-                OutlinedTextField(
-                    price,
-                    { price = it.filter(Char::isDigit) },
-                    label = { Text(priceLabel) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    isError = invalidPrice,
-                    supportingText = if (invalidPrice) {
-                        { Text("Enter a valid price.") }
-                    } else null
+            val isDepositKey = isSecurityDepositWorkItemAttribute(template)
+            if (isDepositKey && hideSecurityDeposit) {
+                return@forEach
+            }
+            if (!priceRendered && !isDealTypesWorkItemAttribute(template) && !isPropertyTypesHandledAttribute(template)) {
+                WorkItemPriceField(
+                    price = price,
+                    onPriceChange = { price = it },
+                    label = priceLabel,
+                    placeholder = pricePlaceholder,
+                    invalid = invalidPrice
                 )
                 priceRendered = true
             }
 
             val value = attributeValues[template.key].orEmpty()
-            val required = template.isRequired || (workItemUsesSecurityDepositEditor(template.key) && !hideSecurityDeposit)
+            val required = template.isRequired || (isDepositKey && !hideSecurityDeposit)
             val templateLabel = if (required) "${template.displayLabel} *" else template.displayLabel
-            val isDepositKey = workItemUsesSecurityDepositEditor(template.key)
 
             val invalid = showValidation && if (isDepositKey) {
                 !hideSecurityDeposit && !securityDepositSelectionValid(depositYears, depositMonths, depositAmount, depositZeroSelected)
@@ -3092,11 +3323,18 @@ private fun ProviderWorkItemEditor(
                         if (catalogOptions.isNotEmpty() || workItemSupportsOtherOption(template.key)) {
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 catalogOptions.forEach { option ->
-                                    val chosen = option in selected
+                                    val chosen = if (option.equals("Rent", ignoreCase = true) || option.equals("Sell", ignoreCase = true)) {
+                                        option.equals(selectedDealType, ignoreCase = true) || option in selected
+                                    } else {
+                                        option in selected
+                                    }
                                     FilterChip(
                                         selected = chosen,
                                         enabled = workItemChoiceChipEnabled(singleSelect, chosen, exclusiveSelectionTaken),
                                         onClick = {
+                                            if (option.equals("Rent", ignoreCase = true) || option.equals("Sell", ignoreCase = true)) {
+                                                selectedDealType = if (chosen) "" else option
+                                            }
                                             if (singleSelect) {
                                                 writeSelection(if (chosen) emptySet() else setOf(option), emptySet())
                                                 otherDraftOpen[template.key] = false
@@ -3174,32 +3412,22 @@ private fun ProviderWorkItemEditor(
         }
 
         if (!priceRendered) {
-            OutlinedTextField(
-                price,
-                { price = it.filter(Char::isDigit) },
-                label = { Text(priceLabel) },
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                isError = invalidPrice,
-                supportingText = if (invalidPrice) {
-                    { Text("Enter a valid price.") }
-                } else null
+            WorkItemPriceField(
+                price = price,
+                onPriceChange = { price = it },
+                label = priceLabel,
+                placeholder = pricePlaceholder,
+                invalid = invalidPrice
             )
             priceRendered = true
         }
     } else {
-        OutlinedTextField(
-            price,
-            { price = it.filter(Char::isDigit) },
-            label = { Text(priceLabel) },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            isError = invalidPrice,
-            supportingText = if (invalidPrice) {
-                { Text("Enter a valid price.") }
-            } else null
+        WorkItemPriceField(
+            price = price,
+            onPriceChange = { price = it },
+            label = priceLabel,
+            placeholder = pricePlaceholder,
+            invalid = invalidPrice
         )
     }
 
@@ -3208,7 +3436,7 @@ private fun ProviderWorkItemEditor(
     Button(
         onClick = {
             val hasInvalidAttribute = sanitizedTemplates.any { template ->
-                val isDepositKey = workItemUsesSecurityDepositEditor(template.key)
+                val isDepositKey = isSecurityDepositWorkItemAttribute(template)
                 if (isDepositKey && hideSecurityDeposit) return@any false
                 if (isDepositKey) {
                     !securityDepositSelectionValid(depositYears, depositMonths, depositAmount, depositZeroSelected)
@@ -3226,11 +3454,11 @@ private fun ProviderWorkItemEditor(
                     )
                 }
             }
-            val title = if (isBroker) label.trim() else defaultWorkItemTitle(
+            val title = if (hasDealTypeField) label.trim() else defaultWorkItemTitle(
                 existing?.title,
-                dealTypesTemplate?.let { currentAttributeValue(it) }
+                sanitizedTemplates.firstOrNull { isDealTypesWorkItemAttribute(it) }?.let { currentAttributeValue(it) }
             )
-            if ((isBroker && title.isBlank()) || price.toDoubleOrNull() == null || hasInvalidAttribute) {
+            if ((hasDealTypeField && title.isBlank()) || price.toDoubleOrNull() == null || hasInvalidAttribute) {
                 showValidation = true
                 return@Button
             }
@@ -3240,8 +3468,8 @@ private fun ProviderWorkItemEditor(
                 addProperty("description", existing?.description.orEmpty())
                 add("attribute_values", com.google.gson.JsonObject().apply {
                     sanitizedTemplates.forEach { template ->
-                        if (template.key == "security_deposit" && hideSecurityDeposit) {
-                            addProperty("security_deposit", "0")
+                        if (isSecurityDepositWorkItemAttribute(template) && hideSecurityDeposit) {
+                            addProperty(template.key, "0")
                             return@forEach
                         }
                         val value = currentAttributeValue(template)
@@ -3557,8 +3785,7 @@ private fun ProviderListingPreviewPage(
     val resolvedType = remember(listing.serviceType, serviceTypes) {
         serviceTypes.firstOrNull { it.slug == listing.serviceType }
     }
-    val serviceName = resolvedType?.name
-        ?: listing.serviceType.replace("_", " ").replaceFirstChar { it.uppercase() }
+    val serviceName = formatServiceTypeDisplayName(resolvedType?.name ?: listing.serviceType)
     val categoryName = listing.categoryName.replace("_", " ").replaceFirstChar { it.uppercase() }
     val images = remember(listing.id, listing.mediaUrls) {
         listing.mediaUrls.filter { it.isNotBlank() }.ifEmpty { getServiceTypeImages(listing.serviceType) }
@@ -3779,8 +4006,7 @@ fun ProviderListingCard(
     val resolvedServiceType = remember(listing.serviceType, serviceTypes) {
         serviceTypes.firstOrNull { it.slug == listing.serviceType }
     }
-    val serviceTypeDisplayName = resolvedServiceType?.name
-        ?: listing.serviceType.replace("_", " ").replaceFirstChar { it.uppercase() }
+    val serviceTypeDisplayName = formatServiceTypeDisplayName(resolvedServiceType?.name ?: listing.serviceType)
     val categoryDisplayName = remember(listing.categoryName, resolvedServiceType) {
         resolvedServiceType?.categorySlug?.replace("_", " ")?.replaceFirstChar { it.uppercase() }
             ?: listing.categoryName.replace("_", " ").replaceFirstChar { it.uppercase() }

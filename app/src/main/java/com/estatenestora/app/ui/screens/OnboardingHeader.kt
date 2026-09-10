@@ -560,7 +560,7 @@ fun OnboardingSearchBar(
         0.dp
     }
     val rotatingServices = remember {
-        listOf("Plumber", "Maid", "Electrician", "Broker", "Flat Owner", "Laundry")
+        listOf("Plumber", "Maid", "Electrician", "Broker", "Property Owner", "Laundry")
     }
     var rotatingServiceIndex by remember { mutableStateOf(0) }
     var typedServiceLength by remember { mutableStateOf(0) }

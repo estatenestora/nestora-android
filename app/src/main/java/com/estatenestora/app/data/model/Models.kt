@@ -310,7 +310,7 @@ data class AndroidListingCard(
         id = listingId,
         title = title,
         categoryName = category,
-        serviceType = serviceType,
+        serviceType = canonicalServiceTypeSlug(serviceType).ifBlank { serviceType },
         providerName = providerName,
         price = basePrice ?: 0.0,
         rating = rating.toFloat(),
@@ -355,8 +355,8 @@ data class AndroidServiceTypeItem(
     @SerializedName("is_active") val isActive: Boolean = true
 ) {
     fun toServiceType(): ServiceType = ServiceType(
-        slug = slug,
-        name = name,
+        slug = canonicalServiceTypeSlug(slug).ifBlank { slug },
+        name = serviceTypeDisplayName(name.ifBlank { slug }),
         emoji = emoji,
         description = description,
         categorySlug = categorySlug,
@@ -759,7 +759,7 @@ data class AndroidBridgeListing(
         title = title,
         description = description,
         categoryName = category,
-        serviceType = serviceType,
+        serviceType = canonicalServiceTypeSlug(serviceType).ifBlank { serviceType },
         providerName = providerName,
         price = basePrice ?: 0.0,
         rating = rating.toFloat(),

@@ -141,7 +141,7 @@ fun getRealLifeImageUrl(key: String): String {
         clean == "rental agent" -> "https://images.unsplash.com/photo-1560520031-3a4dc4e9de0c?w=320&h=320&fit=crop&q=80"
         clean == "pg provider" -> "https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=320&h=320&fit=crop&q=80"
         clean == "hostel provider" -> "https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=320&h=320&fit=crop&q=80"
-        clean == "flat owner" || clean.contains("flat owner") || clean.contains("flat") -> "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=600&h=800&fit=crop&q=80"
+        clean == "property owner" || clean.contains("property owner") || clean == "flat owner" || clean.contains("flat owner") || clean.contains("flat") -> "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=600&h=800&fit=crop&q=80"
         clean == "broker" || clean.contains("broker") -> "https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=600&h=800&fit=crop&q=80"
 
         // --- FOOD & EVENT ---
@@ -212,7 +212,7 @@ fun getRealLifeImageModel(key: String): Any {
         clean == "maid service" || clean == "maid" || clean.contains("maid") -> com.estatenestora.app.R.drawable.maid
         clean == "electrician" || clean.contains("electric") -> com.estatenestora.app.R.drawable.electrician
         clean == "broker" || clean.contains("broker") -> com.estatenestora.app.R.drawable.broker
-        clean == "flat owner" || clean.contains("flat owner") || clean.contains("flat") -> com.estatenestora.app.R.drawable.flat_owner
+        clean == "property owner" || clean.contains("property owner") || clean == "flat owner" || clean.contains("flat owner") || clean.contains("flat") -> com.estatenestora.app.R.drawable.flat_owner
         clean == "laundry service" || clean == "laundry" || clean.contains("laundry") -> com.estatenestora.app.R.drawable.laundry_service
         else -> getRealLifeImageUrl(key)
     }
@@ -435,7 +435,7 @@ fun HomeScreen(
                         PopularServiceItem("Maids", "Daily House Help", "maid"),
                         PopularServiceItem("Electricians", "Wiring & Repair", "electrician"),
                         PopularServiceItem("Brokers", "Verified Agents", "broker"),
-                        PopularServiceItem("Flat Owners", "Direct Rentals", "flat_owner"),
+                        PopularServiceItem("Property Owners", "Direct Rentals", "property_owner"),
                         PopularServiceItem("Laundry Service", "Wash & Fold", "laundry_service")
                     )
                 }

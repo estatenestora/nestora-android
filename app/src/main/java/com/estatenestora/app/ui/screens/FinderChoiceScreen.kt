@@ -293,8 +293,8 @@ fun FinderChoiceScreen(
                 listOf(Color(0xFF2E7D32), Color(0xFF43A047))
             ),
             ServiceShortcut(
-                "Owner Flats", "Find flats directly from owners", "🏡",
-                "flat owners near me",
+                "Property\nOwners", "Direct rentals from owners", "🏡",
+                "property owners near me",
                 listOf(Color(0xFF00838F), Color(0xFF00ACC1))
             ),
             ServiceShortcut(

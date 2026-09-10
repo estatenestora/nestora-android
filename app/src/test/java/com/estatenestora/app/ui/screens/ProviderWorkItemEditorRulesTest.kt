@@ -1,6 +1,7 @@
 package com.estatenestora.app.ui.screens
 
 import com.estatenestora.app.data.model.ServiceAttributeTemplate
+import com.estatenestora.app.data.model.serviceTypeDisplayName
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -83,6 +84,62 @@ class ProviderWorkItemEditorRulesTest {
     }
 
     @Test
+    fun `property owner keeps property type and preferred tenants separate from broker property types`() {
+        val rawPropertyType = ServiceAttributeTemplate(
+            key = "property_type",
+            displayLabel = "Property Type",
+            inputType = "select",
+            options = listOf("Apartment Flat", "Villa")
+        )
+        val rawTenants = ServiceAttributeTemplate(
+            key = "tenant_preference",
+            displayLabel = "Preferred Tenants",
+            inputType = "multiselect",
+            options = listOf("Family")
+        )
+        val sanitized = withPropertyOwnerBrokerFields(listOf(rawPropertyType, rawTenants, parking))
+        assertEquals("property_type", sanitized.first { it.key == "property_type" }.key)
+        assertEquals("tenant_preference", sanitized.first { it.key == "tenant_preference" }.key)
+        assertEquals(listOf("Rent", "Sell"), sanitized.first { it.key == "deal_types" }.options)
+		assertTrue(sanitized.any { it.key == "property_types" })
+        assertEquals("select", sanitized.first { it.key == "property_type" }.inputType)
+        assertEquals("multiselect", sanitized.first { it.key == "tenant_preference" }.inputType)
+        val injected = withPropertyOwnerBrokerFields(emptyList())
+        assertTrue(injected.any { it.key == "deal_types" })
+        assertTrue(injected.any { it.key == "property_type" })
+        assertTrue(injected.any { it.key == "tenant_preference" })
+        assertEquals(
+            listOf("deal_types", "property_types", "security_deposit", "property_type", "tenant_preference", "bhk"),
+            orderedBrokerWorkItemTemplates(
+                listOf(
+                    ServiceAttributeTemplate(key = "bhk", displayLabel = "BHK", inputType = "select"),
+                    securityDeposit,
+                    rawPropertyType,
+                    rawTenants,
+                    propertyTypes,
+                    dealTypes
+                ),
+                hideSecurityDeposit = false
+            ).map { it.key }
+        )
+        assertTrue(isPropertyOwnerWorkItemEditor("property_owner"))
+        assertTrue(isPropertyOwnerWorkItemEditor("property owner"))
+        assertTrue(isPropertyOwnerWorkItemEditor("Flat Owner"))
+        assertTrue(
+            isPropertyOwnerWorkItemEditor(
+                "",
+                listOf(
+                    ServiceAttributeTemplate(key = "property_type", displayLabel = "Property Type", inputType = "select"),
+                    ServiceAttributeTemplate(key = "tenant_preference", displayLabel = "Preferred Tenants", inputType = "multiselect")
+                )
+            )
+        )
+        assertFalse(workItemSupportsOtherOption("deal_types"))
+        assertTrue(workItemSupportsOtherOption("property_type"))
+        assertTrue(workItemSupportsOtherOption("tenant_preference"))
+    }
+
+    @Test
     fun `sell hides security deposit and rent uses rent price label`() {
         assertTrue(brokerHidesSecurityDeposit(listOf("Sell")))
         assertTrue(brokerHidesSecurityDeposit(listOf("Rent", "Sell")))
@@ -91,6 +148,28 @@ class ProviderWorkItemEditorRulesTest {
         assertEquals("Selling Price (₹) *", brokerPriceFieldLabel(listOf("Sell")))
         assertEquals("Price (₹) *", brokerPriceFieldLabel(listOf("Rent", "Sell")))
         assertEquals("Price (₹) *", brokerPriceFieldLabel(emptyList()))
+        assertEquals("Enter monthly rent", brokerPriceFieldPlaceholder(listOf("Rent")))
+        assertEquals("Enter selling price", brokerPriceFieldPlaceholder(listOf("Sell")))
+        assertEquals("Enter price", brokerPriceFieldPlaceholder(listOf("Rent", "Sell")))
+        assertEquals(listOf("Sell"), selectedBrokerDealTypes("Sell"))
+        assertEquals(listOf("Rent"), selectedBrokerDealTypes("Rent"))
+        assertTrue(workItemUsesBrokerDealUi("", listOf(dealTypes)))
+        assertTrue(workItemUsesBrokerDealUi("Property Owner", emptyList()))
+        assertTrue(workItemUsesBrokerDealUi("property_owner", emptyList()))
+        assertFalse(workItemUsesBrokerDealUi("plumber", listOf(parking)))
+        assertTrue(isDealTypesWorkItemAttribute("dealTypes", "Deal Types", listOf("Rent", "Sell")))
+        assertTrue(
+            isDealTypesWorkItemAttribute(
+                "txn",
+                "Deal Types",
+                listOf("Buy", "Rent", "Sell", "PG", "Commercial")
+            )
+        )
+        assertTrue(isDealTypesWorkItemAttribute(dealTypes))
+        assertEquals("deal_types", normalizeWorkItemAttributeKey("dealTypes"))
+        assertEquals("security_deposit", normalizeWorkItemAttributeKey("securityDeposit"))
+        assertTrue(workItemUsesSecurityDepositEditor("securityDeposit"))
+        assertTrue(workItemChoiceIsSingleSelect("dealTypes", "multiselect"))
     }
 
     @Test
@@ -177,7 +256,20 @@ class ProviderWorkItemEditorRulesTest {
             workItemAttributeIsInvalid(dealTypes, "Rent", depositAmount = "")
         )
         assertFalse(
-            workItemAttributeIsInvalid(dealTypes, "", extraChips = listOf("Lease"), otherDraftOpen = true, otherDraftText = "Lease", depositAmount = "")
+            workItemAttributeIsInvalid(
+                ServiceAttributeTemplate(
+                    key = "tenant_preference",
+                    displayLabel = "Preferred Tenants",
+                    inputType = "multiselect",
+                    options = listOf("Family"),
+                    isRequired = true
+                ),
+                "",
+                extraChips = listOf("Working professionals"),
+                otherDraftOpen = true,
+                otherDraftText = "Working professionals",
+                depositAmount = ""
+            )
         )
         assertTrue(
             workItemAttributeIsInvalid(securityDeposit, "", depositAmount = "")
@@ -194,6 +286,28 @@ class ProviderWorkItemEditorRulesTest {
         assertFalse(
             workItemAttributeIsInvalid(parking, "", otherDraftOpen = true, otherDraftText = "", depositAmount = "")
         )
+    }
+
+    @Test
+    fun `formatServiceTypeDisplayName converts owner slugs to Property Owner`() {
+        assertEquals("Property Owner", serviceTypeDisplayName("Flat Owner"))
+        assertEquals("Property Owner", formatServiceTypeDisplayName("property_owner"))
+        assertEquals("Property Owner", formatServiceTypeDisplayName("property owner"))
+        assertEquals("Property Owner", formatServiceTypeDisplayName("flat_owner"))
+        assertEquals("Property Owner", formatServiceTypeDisplayName("flat owner"))
+        assertEquals("Property Owner", formatServiceTypeDisplayName("flat_owners"))
+        assertEquals("Property Owner", formatServiceTypeDisplayName("flat_owner"))
+        assertEquals("Broker", formatServiceTypeDisplayName("Broker"))
+    }
+
+    @Test
+    fun `property type and preferred tenants support other option`() {
+        assertTrue(workItemSupportsOtherOption("property_type"))
+        assertTrue(workItemSupportsOtherOption("property_types"))
+        assertTrue(workItemSupportsOtherOption("preferred_tenants"))
+        assertTrue(workItemSupportsOtherOption("tenant_preference"))
+        assertEquals("Other Preferred Tenant", workItemOtherFieldLabel("Preferred Tenants"))
+        assertEquals("Other Property Type", workItemOtherFieldLabel("Property Type"))
     }
 
     @Test

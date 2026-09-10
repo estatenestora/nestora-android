@@ -200,7 +200,7 @@ fun AutoRegisterScreen(
             com.estatenestora.app.data.model.ServiceType("ac_technician", "AC Repair", "❄️", "Book AC repair", "home_repairs"),
             com.estatenestora.app.data.model.ServiceType("maid_service", "Maid Service", "🧹", "Book maid", "housekeeping"),
             com.estatenestora.app.data.model.ServiceType("cook", "Cook", "🍳", "Book cook", "housekeeping"),
-            com.estatenestora.app.data.model.ServiceType("flat_owner", "Flat Owner", "🏢", "List a flat", "rentals"),
+            com.estatenestora.app.data.model.ServiceType("property_owner", "Property Owner", "🏢", "List a property", "rentals"),
             com.estatenestora.app.data.model.ServiceType("tutor", "Tutor", "🎓", "Book tutor", "education")
         )
     }
@@ -833,7 +833,7 @@ fun AutoRegisterScreen(
                                             TelegramChatMessage(
                                                 id = "bot-select-${System.currentTimeMillis()}",
                                                 sender = "Nestora AI",
-                                                text = "You have selected to register as a ${serviceType.name}. Describe your service details below (for example: rate, availability, and specific skills).",
+                                text = "You have selected to register as a ${com.estatenestora.app.data.model.serviceTypeDisplayName(serviceType.name)}. Describe your service details below (for example: rate, availability, and specific skills).",
                                                 timestamp = getCurrentFormattedTime(),
                                                 isUser = false
                                             )
@@ -862,7 +862,7 @@ fun AutoRegisterScreen(
                                             }
                                             Spacer(Modifier.width(12.dp))
                                             Text(
-                                                text = serviceType.name,
+                                                text = com.estatenestora.app.data.model.serviceTypeDisplayName(serviceType.name),
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFF004D40) // Deep teal text
